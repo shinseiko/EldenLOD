@@ -1,76 +1,77 @@
-# EldenLOD
+# Elden Ring LOD Processing Toolkit
 
-**EldenLOD** is a PowerShell-driven tool that automates the repair and generation of Level of Detail (LOD) meshes for Elden Ring mods missing proper LODs. Works out-of-the-box on PowerShell 7.5.1. PowerShell 5.x support is a work in progress.
-
----
-
-## Features
-
-- Batch detection of missing LOD meshes in modded Elden Ring asset packs
-- Automated LOD mesh generation and integration (planned/experimental)
-- Detailed logging for debugging and workflow review
-- Roadmap-driven: expanding compatibility, automation, and mesh processing features
+A set of PowerShell scripts to automate copying, patching, and repacking LOD (Level of Detail) assets for Elden Ring mods. Designed for modders who want their creations to look right in seamless co-op and at all distances.
 
 ---
 
-## Installation
+## 📦 Contents
 
-### Prerequisites
+- `Copy-To-LOD.ps1`  
+  Copies base `.tpf` and `.flver` files into their corresponding `_L` folders, adding `_L` suffixes to filenames.
 
-- PowerShell 7.5.1 or higher (Windows PowerShell 5.x support coming soon)
-- [List any required third-party modules or tools here, e.g. Blender, SoulsFormats, WitchyBND]
+- `Extract-And-Patch-LOD.ps1`  
+  Extracts `_L.tpf` archives using [WitchyBND](https://github.com/JKAnderson/WitchyBND), renames `.dds` textures with `_L` suffixes, and patches XML texture references as needed.
 
-### Steps
+- `Repack-LOD.ps1`  
+  Deletes old `_L.tpf` files, repacks updated folders with WitchyBND, and cleans up intermediate directories.
 
-1. **Clone the repository:**
-   git clone https://github.com/YourUsername/EldenLOD.git
-
-2. **Navigate to the project directory:**
-   cd EldenLOD
-
-3. **(Optional) Install any dependencies:**
-   [Insert any additional setup instructions here]
+- `Run-All-LOD.ps1`  
+  Orchestrates the above: Copy → Extract/Patch → Repack. By default, it performs a dry run; use `-Execute` to make actual changes.
 
 ---
 
-## Usage
+## ✅ Usage
 
-Basic usage example:
-    .\EldenLOD.ps1 -InputDir "C:\Path\To\YourMod"
+From PowerShell 5.x or 7.x+:
 
-**Options:**
-- `-InputDir` — Path to the mod folder to scan for missing LODs.
-- [Document any other flags or options here.]
+```powershell
+.\Run-All-LOD.ps1 -partsDir "C:\Path\To\Your\parts" -Execute
+```
 
----
-
-## Roadmap
-
-- [x] Initial LOD mesh detection
-- [ ] PowerShell 5.x compatibility
-- [ ] Automatic LOD mesh generation (via Blender integration or custom logic)
-- [ ] GUI frontend
-- [ ] Community contributions, presets, and scripting hooks
+- Omit `-Execute` to simulate all actions without modifying files (dry-run mode).
+- `partsDir` should point to your Elden Ring mod's `parts` directory containing `.partsbnd.dcx` files.
 
 ---
 
-## Contributing
+## ⚠ Requirements
 
-Pull requests are welcome! For major changes, please open an issue first to discuss what you’d like to change.
-See CONTRIBUTING.md for guidelines (to be written!).
+- PowerShell 5.x (Windows) or 7.x+ (cross-platform)
+- [WitchyBND](https://github.com/JKAnderson/WitchyBND) in your system path
 
----
-
-## License
-
-This project is licensed under the MIT License.
+> **Note:** Some advanced PowerShell 7 features may not be available in 5.x. See [Known Issues](#known-issues) below.
 
 ---
 
-## Acknowledgments
+## 📝 Logging & Safety
 
-- FromSoftware for Elden Ring (all rights reserved to the original developers)
-- [List any open source libraries/tools you use]
-- Community contributors
+- All scripts log activity to a `_logs` subfolder inside your parts directory.
+- By default, all scripts are non-destructive—use `-Execute` to apply changes after testing.
 
 ---
+
+## 🐛 Known Issues
+
+- **PowerShell 5.x support is experimental**. Some commands or parameters may fail—please [open an issue](https://github.com/youruser/EldenLOD/issues) if you hit a snag!
+- Scripts assume WitchyBND is accessible via command line.
+- Absolute paths are required; relative paths may not work as expected.
+- Advanced Blender integration for true LOD mesh decimation is *planned* but not yet implemented.
+
+---
+
+## 🤝 Contributing
+
+Pull requests, feature ideas, and bug reports are highly encouraged! See [CONTRIBUTING.md](CONTRIBUTING.md) or open an issue to join the discussion.
+
+---
+
+## 🚀 Future Plans
+
+- One-click LOD mesh decimation via Blender
+- Better cross-platform support (Linux, macOS)
+- Auto-detection of missing LODs and reporting
+- Maybe, just maybe: a GUI (when the backend is indestructible!)
+
+---
+
+**Happy modding!**  
+*Praise the LOD!*

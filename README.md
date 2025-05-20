@@ -1,77 +1,102 @@
-# Elden Ring LOD Processing Toolkit
+# EldenLOD
 
-A set of PowerShell scripts to automate copying, patching, and repacking LOD (Level of Detail) assets for Elden Ring mods. Designed for modders who want their creations to look right in seamless co-op and at all distances.
-
----
-
-## 📦 Contents
-
-- `Copy-To-LOD.ps1`  
-  Copies base `.tpf` and `.flver` files into their corresponding `_L` folders, adding `_L` suffixes to filenames.
-
-- `Extract-And-Patch-LOD.ps1`  
-  Extracts `_L.tpf` archives using [WitchyBND](https://github.com/JKAnderson/WitchyBND), renames `.dds` textures with `_L` suffixes, and patches XML texture references as needed.
-
-- `Repack-LOD.ps1`  
-  Deletes old `_L.tpf` files, repacks updated folders with WitchyBND, and cleans up intermediate directories.
-
-- `Run-All-LOD.ps1`  
-  Orchestrates the above: Copy → Extract/Patch → Repack. By default, it performs a dry run; use `-Execute` to make actual changes.
+EldenLOD is a PowerShell-based toolkit designed to automate the process of copying, patching, and repacking Level of Detail (LOD) assets for Elden Ring mods. This suite ensures that mods display correctly at various distances, enhancing the seamless co-op experience.
 
 ---
 
-## ✅ Usage
+## Features
 
-From PowerShell 5.x or 7.x+:
-
-```powershell
-.\Run-All-LOD.ps1 -partsDir "C:\Path\To\Your\parts" -Execute
-```
-
-- Omit `-Execute` to simulate all actions without modifying files (dry-run mode).
-- `partsDir` should point to your Elden Ring mod's `parts` directory containing `.partsbnd.dcx` files.
+- **Automated LOD Processing:** Streamlines the creation and integration of LOD assets.
+- **Batch Operations:** Processes multiple files and directories efficiently.
+- **Integration with WitchyBND:** Utilizes external tools for archive management.
+- **Modular Scripts:** Offers flexibility through individual scripts or an all-in-one runner.
 
 ---
 
-## ⚠ Requirements
+## Prerequisites
 
-- PowerShell 5.x (Windows) or 7.x+ (cross-platform)
-- [WitchyBND](https://github.com/JKAnderson/WitchyBND) in your system path
-
-> **Note:** Some advanced PowerShell 7 features may not be available in 5.x. See [Known Issues](#known-issues) below.
+- PowerShell 7.5.1 or higher
+- WitchyBND (must be installed and added to your system PATH)
 
 ---
 
-## 📝 Logging & Safety
+## Installation
 
-- All scripts log activity to a `_logs` subfolder inside your parts directory.
-- By default, all scripts are non-destructive—use `-Execute` to apply changes after testing.
+1. **Clone the repository:**
 
----
+        git clone https://github.com/shinseiko/EldenLOD.git
 
-## 🐛 Known Issues
+2. **Navigate to the project directory:**
 
-- **PowerShell 5.x support is experimental**. Some commands or parameters may fail—please [open an issue](https://github.com/youruser/EldenLOD/issues) if you hit a snag!
-- Scripts assume WitchyBND is accessible via command line.
-- Absolute paths are required; relative paths may not work as expected.
-- Advanced Blender integration for true LOD mesh decimation is *planned* but not yet implemented.
+        cd EldenLOD
 
----
-
-## 🤝 Contributing
-
-Pull requests, feature ideas, and bug reports are highly encouraged! See [CONTRIBUTING.md](CONTRIBUTING.md) or open an issue to join the discussion.
+3. **Ensure dependencies are met:**
+   - Verify PowerShell and WitchyBND are correctly installed.
 
 ---
 
-## 🚀 Future Plans
+## Usage
 
-- One-click LOD mesh decimation via Blender
-- Better cross-platform support (Linux, macOS)
-- Auto-detection of missing LODs and reporting
-- Maybe, just maybe: a GUI (when the backend is indestructible!)
+> **IMPORTANT:**  
+> All scripts in EldenLOD require the `-execute` switch to actually perform any actions.  
+> Without `-execute`, the scripts will only perform a dry run and display what they *would* do.
+
+### Run All Steps Sequentially
+
+        .\Run-All-LOD.ps1 -execute
+
+(Executes the entire LOD processing pipeline.)
+
+### Run Individual Steps
+
+- **Copy base files to LOD folders:**
+
+        .\Copy-To-LOD.ps1 -execute
+
+- **Extract and patch LOD archives:**
+
+        .\Extract-And-Patch-LOD.ps1 -execute
+
+- **Repack patched LOD assets:**
+
+        .\Repack-LOD.ps1 -execute
+
+*Note: If running steps individually, execute them in the order above.*
 
 ---
 
-**Happy modding!**  
-*Praise the LOD!*
+## Roadmap
+
+- [x] Implement core LOD processing scripts
+- [ ] Enhance compatibility with PowerShell 5.x
+- [ ] Improve error handling and logging mechanisms
+- [ ] Develop a graphical user interface for ease of use
+- [ ] Expand support for additional asset types
+
+---
+
+## Contributing
+
+Contributions are welcome!
+
+1. Fork the repository.
+2. Create a new branch for your feature or fix.
+3. Commit your changes with clear messages.
+4. Submit a pull request describing your changes.
+
+Please refer to `CONTRIBUTING.md` for more information.
+
+---
+
+## License
+
+This project is licensed under the MIT License.
+
+---
+
+## Acknowledgments
+
+- FromSoftware for Elden Ring.
+- WitchyBND for essential archive management tools.
+
+---

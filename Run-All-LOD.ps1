@@ -3,7 +3,6 @@
   Runs Copy-To-LOD, Extract-And-Patch-LOD, and Repack-LOD in sequence,
   forwarding the -Execute switch when provided.
 #>
-
 param(
     [string]$partsDir = (Get-Location).Path,
     [switch]$Execute

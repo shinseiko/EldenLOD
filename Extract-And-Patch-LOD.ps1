@@ -17,13 +17,15 @@
 .PARAMETER Execute
   If present, performs operations; otherwise shows a dry-run preview.
 #>
-
 param(
     [string] $partsDir = (Get-Location).Path,
     [switch] $Execute
 )
 
-function Timestamp { [DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss') }
+function Timestamp {
+    [DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')
+}
+
 $arrow = if ($PSVersionTable.PSVersion.Major -ge 7) { [char]0x2192 } else { '->' }
 
 # 1) Normalize & verify
@@ -58,7 +60,8 @@ ForEach-Object {
     $tpf = Get-ChildItem -Path $lodDir -Filter '*_L.tpf' -File | Select-Object -First 1
     if (-not $tpf) {
         Write-Warning "No *_L.tpf found in '$lodDir' – skipping."
-        "[$(Timestamp)] No *_L.tpf in $lodDir" | Out-File $logFile -Append
+        $ts = Timestamp
+        "[$ts] No *_L.tpf in $lodDir" | Out-File $logFile -Append
         continue
     }
 
@@ -79,11 +82,12 @@ ForEach-Object {
     & witchybnd -u $tpf.FullName
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "ERROR: witchybnd failed on '$($tpf.Name)'"
-        "[$(Timestamp)] ERROR extracting $($tpf.Name)" | Out-File $logFile -Append
+        $ts = Timestamp
+        "[$ts] ERROR extracting $($tpf.Name)" | Out-File $logFile -Append
         Pop-Location
         continue
     }
-    "[$(Timestamp)] Extracted: $($tpf.Name)" | Out-File $logFile -Append
+    "[$ts] Extracted: $($tpf.Name)" | Out-File $logFile -Append
 
     # 3d) Rename .dds files
     if (Test-Path $extractDir) {
@@ -92,11 +96,13 @@ ForEach-Object {
             $new = "{0}_L{1}" -f $dds.BaseName, $dds.Extension
             Write-Host "Renaming: '$($dds.Name)' $arrow '$new'"
             Rename-Item -Path $dds.FullName -NewName $new -Force
-            "[$(Timestamp)] Renamed: $($dds.Name) → $new" | Out-File $logFile -Append
+            $ts = Timestamp
+            "[$ts] Renamed: $($dds.Name) → $new" | Out-File $logFile -Append
         }
     } else {
         Write-Warning "Expected folder '$extractDir' not found."
-        "[$(Timestamp)] Missing extract folder: $extractDir" | Out-File $logFile -Append
+        $ts = Timestamp
+        "[$ts] Missing extract folder: $extractDir" | Out-File $logFile -Append
     }
 
     # 3e) Patch XML
@@ -104,13 +110,15 @@ ForEach-Object {
         $xml = Get-ChildItem -Path $extractDir -Filter '*.xml' -File | Select-Object -First 1
         if ($xml) {
             Write-Host "Patching XML: '$($xml.Name)'"
-            (Get-Content $xml.FullName) `
-              -replace '(<name>)([^<]+?)(\.dds</name>)','$1$2_L$3' |
-              Set-Content -Path $xml.FullName
-            "[$(Timestamp)] Patched XML: $($xml.Name)" | Out-File $logFile -Append
+            $xmlContent = Get-Content $xml.FullName
+            $patched = $xmlContent -replace '(<name>)([^<]+?)(\.dds</name>)','$1$2_L$3'
+            $patched | Set-Content -Path $xml.FullName
+            $ts = Timestamp
+            "[$ts] Patched XML: $($xml.Name)" | Out-File $logFile -Append
         } else {
             Write-Warning "No XML found in '$extractDir'"
-            "[$(Timestamp)] No XML in $extractDir" | Out-File $logFile -Append
+            $ts = Timestamp
+            "[$ts] No XML in $extractDir" | Out-File $logFile -Append
         }
     }
 
@@ -120,8 +128,10 @@ ForEach-Object {
 # 4) Summary
 if ($Execute) {
     Write-Host "`nExecute complete."
-    "[$(Timestamp)] Execute complete.`n" | Out-File $logFile -Append
+    $ts = Timestamp
+    "[$ts] Execute complete.`n" | Out-File $logFile -Append
 } else {
     Write-Host "`nDry-run complete."
-    "[$(Timestamp)] Dry-run complete.`n" | Out-File $logFile -Append
+    $ts = Timestamp
+    "[$ts] Dry-run complete.`n" | Out-File $logFile -Append
 }

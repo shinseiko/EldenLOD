@@ -135,20 +135,20 @@ foreach ($bndFile in $modPrimaryBnds) {
         $tpfFiles = Get-ChildItem -Path $modExtractDir -Filter '*.tpf' -File
         foreach ($tpf in $tpfFiles) {
             # First ensure we're in the directory containing the TPF
-            Push-Location $modExtractDir
-
-            # Check if TPF needs renumbering first
-            if ($tpf.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.+)\.tpf$') {
+            Push-Location $modExtractDir            # Check if TPF needs renumbering based on BND container vs TPF contents
+            if ($tpf.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.*)\.tpf$') {
                 $tpfPrefix = $matches[1]
-                $tpfNumber = $matches[2]
+                $tpfCurrentNumber = $matches[2]
                 $tpfSuffix = $matches[3]
                 
-                # Get target number from base name (e.g., "1800" from "HD_M_1800")
-                $targetNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
+                # Get expected number from the BND container name (e.g., "1800" from "HD_M_1800")
+                $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
                 
-                if ($tpfNumber -ne $targetNumber) {
-                    $newTpfName = "${tpfPrefix}_${targetNumber}${tpfSuffix}.tpf"
-                    Write-Host "Renumbering TPF: '$($tpf.Name)' -> '$newTpfName'"
+                # Only rename if there's a mismatch between container and contents
+                if ($tpfCurrentNumber -ne $expectedNumber) {
+                    $newTpfName = "${tpfPrefix}_${expectedNumber}${tpfSuffix}.tpf"
+                    Write-Host "Container/Content mismatch - Renumbering TPF: '$($tpf.Name)' -> '$newTpfName'"
+                    Write-Host "  Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
                     if ($Execute) {
                         $oldPath = $tpf.FullName
                         $newPath = Join-Path $modExtractDir $newTpfName
@@ -158,6 +158,8 @@ foreach ($bndFile in $modPrimaryBnds) {
                         $needsRepack = $true
                         $renumbered = $true
                     }
+                } else {
+                    Write-Host "TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
                 }
             }
             
@@ -179,26 +181,30 @@ foreach ($bndFile in $modPrimaryBnds) {
                     Write-VerboseLog -message "Skipped processing empty TPF: $($tpf.Name)" -logFile $logFile
                     continue
                 }
-                
-                # After extraction, verify any DDS files still need renumbering (rare case)
-                $needsRepack = $false
-                $ddsFiles = Get-ChildItem -Path $tpfExtractDir -Filter '*.dds' -File
+                  # Process DDS files inside TPF - only rename if numbers don't match container
                 foreach ($dds in $ddsFiles) {
                     if ($dds.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.+\.dds)$') {
-                        $prefix = $matches[1]
-                        $sourceNumber = $matches[2]
-                        $targetNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
+                        $ddsPrefix = $matches[1]
+                        $ddsCurrentNumber = $matches[2]
+                        $ddsSuffix = $matches[3]
                         
-                        if ($sourceNumber -ne $targetNumber) {
+                        # Get expected number from container BND
+                        $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
+                        
+                        # Only rename if there's a mismatch
+                        if ($ddsCurrentNumber -ne $expectedNumber) {
                             $needsRepack = $true
-                            $newName = "${prefix}_${targetNumber}${matches[3]}"
-                            Write-Host "Found DDS still needing renumber: '$($dds.Name)' -> '$newName'"
+                            $newDdsName = "${ddsPrefix}_${expectedNumber}${ddsSuffix}"
+                            Write-Host "Container/Content mismatch - Renumbering DDS: '$($dds.Name)' -> '$newDdsName'"
+                            Write-Host "  Container expects: $expectedNumber, DDS contains: $ddsCurrentNumber"
                             if ($Execute) {
                                 $oldPath = $dds.FullName
-                                $newPath = Join-Path $tpfExtractDir $newName
+                                $newPath = Join-Path $tpfExtractDir $newDdsName
                                 if (Test-Path $newPath) { Remove-Item $newPath -Force }
-                                Rename-Item -Path $oldPath -NewName $newName -Force
+                                Rename-Item -Path $oldPath -NewName $newDdsName -Force
                             }
+                        } else {
+                            Write-Host "DDS numbering matches container - no renaming needed: '$($dds.Name)'"
                         }
                     }
                 }

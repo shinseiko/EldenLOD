@@ -1,0 +1,45 @@
+project:
+  name: "EldenLOD"
+  version: "2.0.0"
+  purpose: "Elden Ring LOD asset processing toolkit"
+  
+architecture:
+  entry_points:
+    - name: "Invoke-EldenLOD"
+      type: "main_script"
+      parameters:
+        - name: "PartsDir"
+          type: "string"
+          required: false
+          default: "current_directory"
+        - name: "Execute"
+          type: "switch"
+          purpose: "enable_actual_execution"
+  
+  workflow:
+    stages:
+      - name: "validation"
+        dependencies: ["partsDir", "unpackedGameDir"]
+      - name: "extraction"
+        inputs: ["*.partsbnd.dcx"]
+        outputs: ["*-partsbnd-dcx/"]
+      - name: "processing"
+        operations: ["renumber", "patch", "lod_suffix"]
+      - name: "repacking"
+        inputs: ["*-partsbnd-dcx/"]
+        outputs: ["*.partsbnd.dcx"]
+
+  dependencies:
+    external:
+      - name: "WitchyBND"
+        type: "executable"
+        path_required: true
+        purpose: "archive_extraction_repacking"
+    
+  file_patterns:
+    inputs:
+      - "*.partsbnd.dcx"
+      - "*_L.partsbnd.dcx"
+    outputs:
+      - "*-partsbnd-dcx/"
+      - "_logs/*.log"

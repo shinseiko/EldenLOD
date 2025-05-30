@@ -402,3 +402,10 @@ FodyWeavers.xsd
 *.sln.iml
 
 tests/encumbered/
+
+# EldenLOD specific ignores
+_logs/
+*.tmp
+*.temp
+test.log
+.vs/

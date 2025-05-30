@@ -8,18 +8,40 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$scriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$testsDir = Join-Path $scriptsDir "tests"
+$testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent $testsDir
+
+# Handle both original and new directory structure
+$scriptsDir = Join-Path $projectRoot "scripts"
+if (-not (Test-Path $scriptsDir)) {
+    # Fall back to the project root if scripts directory doesn't exist
+    $scriptsDir = $projectRoot
+}
+
 $encumberedDir = Join-Path $testsDir "encumbered"
 
 # Test configuration
 $testConfig = @{
     CleanZip = Join-Path $encumberedDir "$TestCaseName.zip"
-    ExpectedZip = Join-Path $encumberedDir "$TestCaseName-Fixed.zip"
+    ExpectedZip = Join-Path $encumberedDir "$TestCaseName-Fixed.zip" 
     WorkingDir = Join-Path $encumberedDir "test-working"
     ExpectedDir = Join-Path $encumberedDir "test-expected"
     LogFile = Join-Path $testsDir "test-results.log"
     MainScript = Join-Path $scriptsDir "EldenLOD-Extract.ps1"
+}
+
+# Ensure the LogFile directory exists
+$logDir = Split-Path -Parent $testConfig.LogFile
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+# Ensure the MainScript exists, if not try both paths
+if (-not (Test-Path $testConfig.MainScript)) {
+    $altScriptPath = Join-Path $projectRoot "EldenLOD-Extract.ps1"
+    if (Test-Path $altScriptPath) {
+        $testConfig.MainScript = $altScriptPath
+    }
 }
 
 function Write-TestLog {

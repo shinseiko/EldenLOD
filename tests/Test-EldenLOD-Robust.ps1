@@ -1,5 +1,23 @@
 # Elden Ring LOD Test Framework - Robust Version
 # Automated testing for the EldenLOD script functionality
+<#
+.SYNOPSIS
+    Advanced test framework for EldenLOD functionality with robust error handling.
+.DESCRIPTION
+    This script provides comprehensive testing for the EldenLOD system, with detailed logging,
+    proper error handling, and validation of expected results. It supports both
+    the original directory structure and the new reorganized structure.
+.PARAMETER TestCaseName
+    Name of the test case to use from the encumbered directory.
+.PARAMETER Verbose
+    Enable verbose output of test progress.
+.PARAMETER KeepTempFiles
+    Retain temporary files after testing for debugging purposes.
+.NOTES
+    Author: EldenLOD Team
+    Version: 0.1 Alpha
+    Created: 2025-05-28
+#>
 
 param(
     [string]$TestCaseName = "TestCaseMaliketh",
@@ -9,8 +27,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$scriptsDir = Split-Path -Parent $testsDir
+$projectRoot = Split-Path -Parent $testsDir
 $encumberedDir = Join-Path $testsDir "encumbered"
+
+# Handle both original and new directory structure
+$scriptsDir = Join-Path $projectRoot "scripts"
+if (-not (Test-Path $scriptsDir)) {
+    # Fall back to the project root if scripts directory doesn't exist
+    $scriptsDir = $projectRoot
+}
 
 # Test configuration
 $testConfig = @{
@@ -18,6 +43,14 @@ $testConfig = @{
     WorkingDir = Join-Path $encumberedDir "test-working"
     LogFile = Join-Path $testsDir "test-results.log"
     MainScript = Join-Path $scriptsDir "EldenLOD-Extract.ps1"
+}
+
+# Ensure the MainScript exists, if not try both paths
+if (-not (Test-Path $testConfig.MainScript)) {
+    $altScriptPath = Join-Path $projectRoot "EldenLOD-Extract.ps1"
+    if (Test-Path $altScriptPath) {
+        $testConfig.MainScript = $altScriptPath
+    }
 }
 
 function Write-TestLog {

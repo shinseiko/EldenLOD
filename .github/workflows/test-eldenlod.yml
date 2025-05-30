@@ -116,6 +116,9 @@ jobs:
           tests/**/*.log
           tests/**/*results*
         retention-days: 7
+
+  # Integration test job
+  integration-test:
     runs-on: windows-latest
     
     steps:

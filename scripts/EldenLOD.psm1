@@ -1,6 +1,40 @@
-# EldenLOD PowerShell Module
-# Common functions for working with Elden Ring LOD assets
+<#
+.SYNOPSIS
+    EldenLOD PowerShell Module - Tool for modifying Elden Ring LOD assets
+.DESCRIPTION
+    Provides functions for extracting, modifying, and repacking Elden Ring
+    Level of Detail (LOD) game assets. This module contains common functions
+    shared across the EldenLOD scripts.
+.NOTES
+    Author: shinseiko
+    Version: 0.1-alpha
+    Date: 2025-05-30
+    Requirements: PowerShell 5.1+
+    License: MIT
+.LINK
+    Project repository: https://github.com/shinseiko/EldenLOD
+#>
 
+# @metadata: {
+#   "version": "0.1-alpha",
+#   "author": "shinseiko",
+#   "dependencies": ["System.IO", "System.Drawing", "System.Xml"],
+#   "complexity": "medium"
+# }
+
+#region Helper Functions
+
+<#
+.SYNOPSIS
+    Returns a formatted timestamp string for logging
+.DESCRIPTION
+    Generates a consistent timestamp format (yyyy-MM-dd HH:mm:ss) for use in log messages
+.OUTPUTS
+    String containing formatted current timestamp
+.EXAMPLE
+    $ts = Timestamp
+    # Returns: "2025-05-30 15:45:22"
+#>
 function Timestamp {
     [DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')
 }

@@ -1,25 +1,8 @@
 <#
 .SYNOPSIS
   Safely extracts, renumbers, and prepares Elden Ring LOD asset archives for modding.
-  Ensures all LOD BNDs get injected with your modded TPF/FLVER, even if vanilla d                # Update XMLs if we renamed files
-                if ($needsRepack) {
-                    $xmlFiles = Get-ChildItem -Path $tpfExtractDir -Filter '*.xml' -File
-                    foreach ($xml in $xmlFiles) {
-                        $xmlContent = Get-Content $xml.FullName -Raw
-                        
-                        # More precise XML update to handle all numbering cases
-                        $targetNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
-                        $newXml = $xmlContent -replace '<n>([A-Z]+_[A-Z]+)_[0-9]+([^<>]+\.dds)<\/n>', "<n>`$1_$targetNumber`$2</n>"
-                        
-                        if ($newXml -ne $xmlContent) {
-                            Write-Host "Patching XML: '$($xml.Name)' (updating file numbers to $targetNumber)"
-                            Write-VerboseLog -message "TPF XML update: $($xml.Name) (Number: $targetNumber)" -logFile $logFile
-                            if ($Execute) {
-                                $newXml | Set-Content -Path $xml.FullName -Encoding UTF8 -NoNewline
-                            }
-                        }
-                    } them,
-  and extracts in the correct order so no step is skipped or deleted early.
+  Ensures all LOD BNDs get injected with your modded TPF/FLVER, even if vanilla data 
+  has different numbering, and extracts in the correct order so no step is skipped.
 
 .PARAMETER partsDir
   Folder containing your working mod .partsbnd.dcx files.
@@ -49,13 +32,12 @@ if (-not $UnpackedGameDir -or -not (Test-Path $UnpackedGameDir)) {
         $UnpackedGameDir = $env:UnpackedGameDir
     } else {
         # Only check current directory
-        $localUnpackedGame = Join-Path $partsDir 'UnpackedGame'
-        
-        if (Test-Path $localUnpackedGame) { 
-            $UnpackedGameDir = $localUnpackedGame
-        }
-        else {
-            Write-Error "No UnpackedGame directory found in '$partsDir'. Please specify -UnpackedGameDir or set UnpackedGameDir environment variable."
+        $parentDir = Split-Path $partsDir -Parent
+        $guessDir = Join-Path $parentDir 'parts'
+        if (Test-Path $guessDir) {
+            $UnpackedGameDir = Split-Path $guessDir -Parent
+        } else {
+            Write-Warning "UnpackedGameDir not found. Please set `$env:UnpackedGameDir or provide -UnpackedGameDir parameter."
             exit 1
         }
     }
@@ -66,76 +48,78 @@ Write-Host "INFO: Using vanilla parts dir: $vanillaPartsDir"
 
 $logDir = Join-Path $partsDir '_logs'
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
-$logFile = Join-Path $logDir 'Extract-And-Patch-LOD.log'
-"[{0}] Starting Extract-And-Patch-LOD.ps1 Execute={1}`n" -f (Timestamp), $Execute |
+$logFile = Join-Path $logDir 'EldenLOD-Extract.log'
+"[{0}] Starting EldenLOD-Extract.ps1 Execute={1}`n" -f (Timestamp), $Execute |
     Out-File -FilePath $logFile -Encoding UTF8 -Append
 
-if (-not $Execute) { Write-Warning 'DRY-RUN MODE: no changes will be made. Add -Execute to apply.' }
+if (-not $Execute) { 
+    Write-Warning 'DRY-RUN MODE: no changes will be made. Add -Execute to apply.'
+    Write-Host "DRY-RUN will show you:"
+    Write-Host "  - Which files would be renamed and why"
+    Write-Host "  - Which XML references would be updated"
+    Write-Host "  - Which archives would be repacked"
+    Write-Host "  - Which directories would be cleaned up"
+    Write-Host ""
+}
 
-# Track TPF extract directories for delayed cleanup
-$tpfExtractDirs = @()
-
-# --- Main Processing Loop ---
+# --- Main Processing ---
 $modPrimaryBnds = Get-ChildItem -Path $partsDir -Filter '*.partsbnd.dcx' -File | Where-Object { $_.BaseName -notmatch '_L$' }
 
-$totalBnds = $modPrimaryBnds.Count
-$currentBnd = 0
-
 foreach ($bndFile in $modPrimaryBnds) {
-    $currentBnd++
-    $progress = [math]::Round(($currentBnd / $totalBnds) * 100)
-    Write-Progress -Activity "Processing BNDs" -Status "$($bndFile.Name)" -PercentComplete $progress
-    
     $base = $bndFile.Name -replace '\.partsbnd\.dcx$', ''
     $baseUpper = $base.ToUpper()
-    if ($base -notmatch '_L$') {
-        $lodFile = "${base}_L.partsbnd.dcx"
-    } else {
-        $lodFile = "${base}.partsbnd.dcx"
-    }
+    $lodFile = "${base}_L.partsbnd.dcx"
     $modLodPath = Join-Path $partsDir $lodFile
+    
+    Write-Host "`n===== Processing: $($bndFile.Name) ====="
+    Write-VerboseLog -message "Processing BND: $($bndFile.Name) -> Expected LOD: $lodFile" -logFile $logFile
+    
     $renumbered = $false
+    $tpfExtractDirs = @()
 
-    # --- 1. Ensure LOD BND is present (copy vanilla if missing) ---
+    # --- 1. Ensure LOD BND exists (copy vanilla if missing) ---
     if (!(Test-Path $modLodPath)) {
         $vanillaLodPath = Join-Path $vanillaPartsDir $lodFile
         if (Test-Path $vanillaLodPath) {
+            Write-Host "Copying vanilla LOD BND: '$lodFile'"
             if ($Execute) {
-                Write-Host "Copying vanilla $lodFile from $vanillaPartsDir"
-                Copy-Item $vanillaLodPath $modLodPath -Force
-            } else {
-                Write-Host "WhatIf: would copy vanilla $lodFile from $vanillaPartsDir"
+                Copy-Item -Path $vanillaLodPath -Destination $modLodPath -Force
+                Write-VerboseLog -message "Copied vanilla LOD: $vanillaLodPath -> $modLodPath" -logFile $logFile
             }
-            $ts = Timestamp
-            "[$ts] Copied vanilla $lodFile" | Out-File -FilePath $logFile -Encoding UTF8 -Append
         } else {
-            Write-Warning "Missing both modded and vanilla $lodFile. Skipping."
-            $ts = Timestamp
-            "[$ts] Missing both modded and vanilla $lodFile" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+            Write-Warning "Cannot find vanilla LOD BND: '$vanillaLodPath' - skipping."
+            Write-LogMessage -message "Missing vanilla LOD BND: $vanillaLodPath" -logFile $logFile -isError
             continue
         }
     }
 
-    # --- 2. Extract modded BND (not recursive) if not already extracted ---
+    # --- 2. Extract modded BND (skip if already extracted) ---
     $modExtractDir = Join-Path $partsDir ($base + '-partsbnd-dcx')
-    if ($Execute -and !(Test-Path $modExtractDir)) {
-        Push-Location $partsDir
-        Write-Host "Extracting modded: '$($bndFile.Name)' -> '$modExtractDir'"
-        & witchybnd -u $($bndFile.Name)
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $modExtractDir)) {
-            Write-Warning "ERROR: WitchyBND failed to extract modded BND or directory missing: $modExtractDir"
-            $ts = Timestamp
-            "[$ts] ERROR extracting $($bndFile.Name) or missing extract dir" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    if (!(Test-Path $modExtractDir)) {
+        Write-Host "Extracting modded BND: '$($bndFile.Name)'"
+        Write-VerboseLog -message "Starting BND extraction: $($bndFile.Name)" -logFile $logFile
+        if ($Execute) {
+            Push-Location $partsDir
+            & witchybnd -u $bndFile.Name
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "ERROR: Failed to extract modded BND: $($bndFile.Name)"
+                Write-LogMessage -message "BND extraction failed: $($bndFile.Name)" -logFile $logFile -isError
+                Pop-Location
+                continue
+            }
             Pop-Location
-            continue
         }
-        Pop-Location
+    } else {
+        Write-Host "Modded BND already extracted: '$modExtractDir'"
+        Write-VerboseLog -message "BND already extracted: $modExtractDir" -logFile $logFile
     }    # --- 3. Process TPFs: renumber, extract, and handle contents ---
     if (Test-Path $modExtractDir) {
         $tpfFiles = Get-ChildItem -Path $modExtractDir -Filter '*.tpf' -File
         foreach ($tpf in $tpfFiles) {
             # First ensure we're in the directory containing the TPF
-            Push-Location $modExtractDir            # Check if TPF needs renumbering based on BND container vs TPF contents
+            Push-Location $modExtractDir
+            
+            # Check if TPF needs renumbering based on BND container vs TPF contents
             if ($tpf.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.*)\.tpf$') {
                 $tpfPrefix = $matches[1]
                 $tpfCurrentNumber = $matches[2]
@@ -143,86 +127,84 @@ foreach ($bndFile in $modPrimaryBnds) {
                 
                 # Get expected number from the BND container name (e.g., "1800" from "HD_M_1800")
                 $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
-                
-                # Only rename if there's a mismatch between container and contents
+                  # Only rename if there's a mismatch between container and contents
                 if ($tpfCurrentNumber -ne $expectedNumber) {
                     $newTpfName = "${tpfPrefix}_${expectedNumber}${tpfSuffix}.tpf"
-                    Write-Host "Container/Content mismatch - Renumbering TPF: '$($tpf.Name)' -> '$newTpfName'"
-                    Write-Host "  Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
-                    if ($Execute) {
+                    if (-not $Execute) {
+                        Write-Host "[DRY-RUN] Would rename TPF: '$($tpf.Name)' -> '$newTpfName'"
+                        Write-Host "[DRY-RUN]   Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
+                        Write-Host "[DRY-RUN]   Would update BND4 XML references"
+                    } else {
+                        Write-Host "Container/Content mismatch - Renumbering TPF: '$($tpf.Name)' -> '$newTpfName'"
+                        Write-Host "  Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
+                        
                         $oldPath = $tpf.FullName
                         $newPath = Join-Path $modExtractDir $newTpfName
                         if (Test-Path $newPath) { Remove-Item $newPath -Force }
                         Rename-Item -Path $oldPath -NewName $newTpfName -Force
                         $tpf = Get-Item $newPath # Update TPF reference to renamed file
-                        $needsRepack = $true
                         $renumbered = $true
+                        
+                        # Update BND4 XML to reference the new TPF filename
+                        $bndXmlFile = Join-Path $modExtractDir "_witchy-bnd4.xml"
+                        if (Test-Path $bndXmlFile) {
+                            $bndXmlContent = Get-Content $bndXmlFile -Raw
+                            $oldTpfName = "${tpfPrefix}_${tpfCurrentNumber}${tpfSuffix}.tpf"
+                            $newBndXml = $bndXmlContent -replace [regex]::Escape($oldTpfName), $newTpfName
+                            if ($newBndXml -ne $bndXmlContent) {
+                                Write-Host "Updating BND4 XML references: '$oldTpfName' -> '$newTpfName'"
+                                $newBndXml | Set-Content -Path $bndXmlFile -Encoding UTF8 -NoNewline
+                            }
+                        }
                     }
                 } else {
-                    Write-Host "TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
+                    if (-not $Execute) {
+                        Write-Host "[DRY-RUN] TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
+                    } else {
+                        Write-Host "TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
+                    }
                 }
             }
+              # Now extract the TPF (witchybnd will create the -tpf directory and XML)
+            if (-not $Execute) {
+                Write-Host "[DRY-RUN] Would extract TPF: '$($tpf.Name)'"
+            } else {
+                Write-Host "Extracting TPF: '$($tpf.Name)'"
+                Write-VerboseLog -message "Starting TPF extraction: $($tpf.Name)" -logFile $logFile
+                
+                & witchybnd -u $tpf.Name
+            }
             
-            # Now extract the TPF (witchybnd will create the -tpf directory and XML)
-            Write-Host "Extracting TPF: '$($tpf.Name)'"
-            Write-VerboseLog -message "Starting TPF extraction: $($tpf.Name)" -logFile $logFile
-            
-            & witchybnd -u $tpf.Name
             $tpfExtractDir = Join-Path $modExtractDir ("$($tpf.BaseName)-tpf")
-              if ($LASTEXITCODE -eq 0 -and (Test-Path $tpfExtractDir)) {
-                Write-VerboseLog -message "TPF extracted: $($tpf.Name) -> $tpfExtractDir" -logFile $logFile
+            
+            if (($Execute -and $LASTEXITCODE -eq 0 -and (Test-Path $tpfExtractDir)) -or (-not $Execute)) {
+                if ($Execute) {
+                    Write-VerboseLog -message "TPF extracted: $($tpf.Name) -> $tpfExtractDir" -logFile $logFile
+                }
                 
                 # Track for cleanup
                 $tpfExtractDirs += $tpfExtractDir
                 
                 # Check if TPF is intentionally empty first
-                if (Test-TpfEmpty -tpfExtractDir $tpfExtractDir -logFile $logFile) {
+                if ($Execute -and (Test-TpfEmpty -tpfExtractDir $tpfExtractDir -logFile $logFile)) {
                     Write-Host "TPF is intentionally empty, skipping renumbering: '$($tpf.Name)'"
                     Write-VerboseLog -message "Skipped processing empty TPF: $($tpf.Name)" -logFile $logFile
                     continue
+                } elseif (-not $Execute) {
+                    Write-Host "[DRY-RUN] Would check if TPF is empty and skip if needed"
                 }
-                  # Process DDS files inside TPF - only rename if numbers don't match container
-                foreach ($dds in $ddsFiles) {
-                    if ($dds.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.+\.dds)$') {
-                        $ddsPrefix = $matches[1]
-                        $ddsCurrentNumber = $matches[2]
-                        $ddsSuffix = $matches[3]
-                        
-                        # Get expected number from container BND
-                        $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
-                        
-                        # Only rename if there's a mismatch
-                        if ($ddsCurrentNumber -ne $expectedNumber) {
-                            $needsRepack = $true
-                            $newDdsName = "${ddsPrefix}_${expectedNumber}${ddsSuffix}"
-                            Write-Host "Container/Content mismatch - Renumbering DDS: '$($dds.Name)' -> '$newDdsName'"
-                            Write-Host "  Container expects: $expectedNumber, DDS contains: $ddsCurrentNumber"
-                            if ($Execute) {
-                                $oldPath = $dds.FullName
-                                $newPath = Join-Path $tpfExtractDir $newDdsName
-                                if (Test-Path $newPath) { Remove-Item $newPath -Force }
-                                Rename-Item -Path $oldPath -NewName $newDdsName -Force
-                            }
-                        } else {
-                            Write-Host "DDS numbering matches container - no renaming needed: '$($dds.Name)'"
-                        }
-                    }
-                }
-
-                # Update XML references if needed
-                if ($needsRepack) {
-                    $xmlFiles = Get-ChildItem -Path $tpfExtractDir -Filter '*.xml' -File
-                    foreach ($xml in $xmlFiles) {
-                        $xmlContent = Get-Content $xml.FullName -Raw
-                        $targetNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
-                        $newXml = $xmlContent -replace '<n>([A-Z]+_[A-Z]+)_[0-9]+([^<>]+\.dds)<\/n>', "<n>`$1_${targetNumber}`$2</n>"
-                        
-                        if ($newXml -ne $xmlContent) {
-                            Write-Host "Patching XML: '$($xml.Name)' (updating file numbers to $targetNumber)"
-                            Write-VerboseLog -message "TPF XML update: $($xml.Name) (Number: $targetNumber)" -logFile $logFile
-                            if ($Execute) {
-                                $newXml | Set-Content -Path $xml.FullName -Encoding UTF8 -NoNewline
-                            }
+                
+                # Process DDS files using shared module function
+                $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
+                $ddsResult = Invoke-DdsRenumbering -tpfExtractDir $tpfExtractDir -expectedNumber $expectedNumber -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)
+                
+                if ($ddsResult.Renumbered) {
+                    $renumbered = $true
+                    
+                    # Update TPF XML references using shared module function
+                    if (Update-TpfXmlReferences -tpfExtractDir $tpfExtractDir -renamedFiles $ddsResult.RenamedFiles -expectedNumber $expectedNumber -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)) {
+                        if (-not $Execute) {
+                            Write-Host "[DRY-RUN] Would update TPF XML references"
                         }
                     }
                 }
@@ -230,8 +212,26 @@ foreach ($bndFile in $modPrimaryBnds) {
                 Write-Warning "Failed to extract TPF: $($tpf.Name)"
                 Write-LogMessage -message "TPF extraction failed: $($tpf.Name)" -logFile $logFile -isError
             }
+              Pop-Location
+        }        # --- 4. Process other file types using shared module function ---
+        if (Test-Path $modExtractDir) {
+            # Get expected number from the BND container name (e.g., "1800" from "HD_M_1800")
+            $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
             
-            Pop-Location
+            # Use shared module function for file renumbering (currentNumber will be auto-detected from files)
+            $fileResult = Invoke-FileRenumbering -extractDir $modExtractDir -expectedNumber $expectedNumber -currentNumber "auto" -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)
+            
+            if ($fileResult.Renumbered) {
+                $renumbered = $true
+                
+                # Update BND4 XML references using shared module function
+                $bndXmlFile = Join-Path $modExtractDir "_witchy-bnd4.xml"
+                if (Update-BndXmlReferences -bndXmlFile $bndXmlFile -renamedFiles $fileResult.RenamedFiles -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)) {
+                    if (-not $Execute) {
+                        Write-Host "[DRY-RUN] Would update BND4 XML references"
+                    }
+                }
+            }
         }
     }    # If renumbered, repack the modded BND
     if ($renumbered -and $Execute) {
@@ -255,7 +255,9 @@ foreach ($bndFile in $modPrimaryBnds) {
                     Remove-Item $tpfExtractDir -Recurse -Force
                 }
             }
-        }# Then repack the main BND
+        }
+
+        # Then repack the main BND
         Push-Location $partsDir
         Write-Host "Repacking modded BND: '$($bndFile.Name)'"
         & witchybnd -r ($base + '-partsbnd-dcx')
@@ -267,149 +269,145 @@ foreach ($bndFile in $modPrimaryBnds) {
             continue
         }
         Pop-Location
-
-        # Create LOD dir if needed
-        if (-not (Test-Path $lodDir)) {
-            New-Item -Path $lodDir -ItemType Directory -Force | Out-Null
+        
+        # Clean up the modded extract directory after successful repack
+        if (Test-Path $modExtractDir) {
+            Remove-Item $modExtractDir -Recurse -Force
         }
-
-        # NOW move files to LOD dir
-        $packedFlver = Get-ChildItem -Path $modExtractDir -Filter '*.flver' -File | Select-Object -First 1
-        $packedTpf   = Get-ChildItem -Path $modExtractDir -Filter '*.tpf'   -File | Select-Object -First 1
-        if ($packedFlver) {
-            $flverDest = Join-Path $lodDir ("$baseUpper`_L.flver")
-            Write-Host "Moving FLVER to LOD: '$($packedFlver.Name)' -> '$([IO.Path]::GetFileName($flverDest))'"
-            Move-Item $packedFlver.FullName $flverDest -Force
-        }
-        if ($packedTpf) {
-            $tpfDest = Join-Path $lodDir ("$baseUpper`_L.tpf") 
-            Write-Host "Moving TPF to LOD: '$($packedTpf.Name)' -> '$([IO.Path]::GetFileName($tpfDest))'"
-            Move-Item $packedTpf.FullName $tpfDest -Force
-            
-            # Extract copied TPF in LOD dir
-            Push-Location $lodDir
-            & witchybnd -u $([IO.Path]::GetFileName($tpfDest))
-            Pop-Location
-        }
-
-        # Clean up extracted dirs
-        Remove-Item $modExtractDir -Recurse -Force
-    }
-
-    # --- 4. Extract/copy vanilla LOD BND as needed ---
+    } elseif ($renumbered -and -not $Execute) {
+        Write-Host "[DRY-RUN] Would repack modified TPFs and main BND due to renumbering"
+        Write-Host "[DRY-RUN] Would clean up extracted directories after repacking"
+    }    # --- 4. Extract LOD BND (skip if already extracted) ---
     $lodDir = Join-Path $partsDir ($lodFile -replace '\.partsbnd\.dcx$', '-partsbnd-dcx')
-    if ($Execute) {
-        Push-Location $partsDir
-        Write-Host "Extracting: '$lodFile' -> '$lodDir' (not recursive)"
-        & witchybnd -u $lodFile
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $lodDir)) {
-            Write-Warning "ERROR: witchybnd failed on '$lodFile'"
-            $ts = Timestamp
-            "[$ts] ERROR extracting $lodFile" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    if (!(Test-Path $lodDir)) {
+        if (-not $Execute) {
+            Write-Host "[DRY-RUN] Would extract LOD BND: '$lodFile'"
+        } else {
+            Write-Host "Extracting LOD BND: '$lodFile'"
+            Write-VerboseLog -message "Starting LOD BND extraction: $lodFile" -logFile $logFile
+            
+            Push-Location $partsDir
+            & witchybnd -u $lodFile
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "ERROR: Failed to extract LOD BND: $lodFile"
+                Write-LogMessage -message "LOD BND extraction failed: $lodFile" -logFile $logFile -isError
+                Pop-Location
+                continue
+            }
             Pop-Location
-            continue
         }
-        $ts = Timestamp
-        "[$ts] Extracted: $lodFile" | Out-File -FilePath $logFile -Encoding UTF8 -Append
-        Pop-Location
     } else {
-        Write-Host "WhatIf: would extract '$lodFile' -> '$lodDir' (not recursive)"
-    }
-
-    # --- 5. Copy modded FLVER/TPF to LOD dir as _L.flver / _L.tpf, and extract the TPF in place ---
-    if ($Execute -and (Test-Path $lodDir)) {
-        $modFlver = Get-ChildItem -Path $partsDir -Filter "$base.flver" -File | Select-Object -First 1
-        $modTpf = Get-ChildItem -Path $partsDir -Filter "$base.tpf" -File | Select-Object -First 1
-        if ($modFlver) {
-            $destFlver = Join-Path $lodDir ("$baseUpper`_L.flver")
-            Write-Host "Copying modded FLVER: '$($modFlver.Name)' -> '$([IO.Path]::GetFileName($destFlver))'"
-            Copy-Item $modFlver.FullName $destFlver -Force
+        if (-not $Execute) {
+            Write-Host "[DRY-RUN] LOD BND already extracted: '$lodDir'"
+        } else {
+            Write-Host "LOD BND already extracted: '$lodDir'"
+            Write-VerboseLog -message "LOD BND already extracted: $lodDir" -logFile $logFile
         }
-        if ($modTpf) {
-            $destTpf = Join-Path $lodDir ("$baseUpper`_L.tpf")
-            Write-Host "Copying modded TPF: '$($modTpf.Name)' -> '$([IO.Path]::GetFileName($destTpf))'"
-            Copy-Item $modTpf.FullName $destTpf -Force
-            # Extract copied TPF in-place (not recursive) for LOD DDS renaming
-            Push-Location $lodDir
-            & witchybnd -u $([IO.Path]::GetFileName($destTpf))
-            Pop-Location
-        }
-    }    # --- 6. Add _L suffix to DDS files in extracted LOD TPF folder, update XMLs ---
-    if (Test-Path $lodDir) {
-        $tpfFiles = Get-ChildItem -Path $lodDir -Filter '*_L.tpf' -File
-        foreach ($tpf in $tpfFiles) {
-            $extractDir = Join-Path $lodDir ("$($tpf.BaseName)-tpf")
-            if (Test-Path $extractDir) {
-                # Check if LOD TPF is intentionally empty
-                if (Test-TpfEmpty -tpfExtractDir $extractDir -logFile $logFile) {
-                    Write-Host "LOD TPF is intentionally empty, skipping _L suffix processing: '$($tpf.Name)'"
-                    Write-VerboseLog -message "Skipped LOD processing for empty TPF: $($tpf.Name)" -logFile $logFile
-                    continue
-                }
-                
-                $ddsFiles = Get-ChildItem -Path $extractDir -Filter '*.dds' -File
-                foreach ($dds in $ddsFiles) {
-                    if ($dds.Name -notmatch '_L\.dds$') {
-                        $newName = [IO.Path]::GetFileNameWithoutExtension($dds.Name) + '_L.dds'
-                        $newPath = Join-Path $extractDir $newName
-                        Write-Host "LOD Add _L: '$($dds.Name)' -> '$newName'"
-                        if ($Execute) {
-                            if (Test-Path $newPath) { Remove-Item $newPath -Force }
-                            Rename-Item -Path $dds.FullName -NewName $newName
-                            $ts = Timestamp
-                            "[$ts] LOD Add _L: $($dds.Name) -> $newName" | Out-File -FilePath $logFile -Encoding UTF8 -Append
-                        }
+    }    # --- 5. Copy modded files to LOD directory ---
+    if (($Execute -and (Test-Path $lodDir)) -or (-not $Execute)) {
+        if ((Test-Path $modExtractDir) -or (-not $Execute)) {
+            if (-not $Execute) {
+                Write-Host "[DRY-RUN] Would copy modded files to LOD directory"
+                if (Test-Path $modExtractDir) {
+                    $modFiles = Get-ChildItem -Path $modExtractDir -File
+                    foreach ($modFile in $modFiles) {
+                        Write-Host "[DRY-RUN]   Would copy: '$($modFile.Name)'"
                     }
                 }
-                # Update XMLs in the LOD extracted TPF
-                $xmlFiles = Get-ChildItem -Path $extractDir -Filter '*.xml' -File
-                foreach ($xml in $xmlFiles) {
-                    $xmlContent = Get-Content $xml.FullName
-                    $newXml = $xmlContent -replace '<name>([A-Za-z0-9_]+)\.dds</name>', '<name>$1_L.dds</name>'
-                    if ($newXml -ne $xmlContent) {
-                        Write-Host "LOD Patch XML for _L: '$($xml.Name)'"
-                        if ($Execute) {
-                            $newXml | Set-Content -Path $xml.FullName -Encoding UTF8
-                            $ts = Timestamp
-                            "[$ts] LOD Patch XML for _L: $($xml.Name)" | Out-File -FilePath $logFile -Encoding UTF8 -Append
-                        }
-                    }
-                }            } else {
-                # Try to extract the TPF if it exists but hasn't been extracted
-                if ($Execute -and (Test-Path $tpf.FullName)) {
-                    Push-Location $lodDir
-                    Write-Host "Re-attempting TPF extraction: '$($tpf.Name)'"
-                    & witchybnd -u $tpf.Name
-                    if ($LASTEXITCODE -eq 0 -and (Test-TpfValid -tpfPath $tpf.FullName -expectedDir $extractDir -logFile $logFile)) {
-                        Write-Host "Successfully re-extracted TPF: $($tpf.Name)"
-                    } else {
-                        Write-Warning "Failed to re-extract TPF: $($tpf.Name)"
-                        Write-LogMessage -message "Failed to extract TPF: $($tpf.Name)" -logFile $logFile -isError
-                    }
-                    Pop-Location
-                } else {
-                    Write-Warning "Expected folder '$extractDir' not found and TPF extraction failed."
-                    $ts = Timestamp
-                    "[$ts] Missing extract folder and TPF extraction failed: $extractDir" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+            } else {
+                $modFiles = Get-ChildItem -Path $modExtractDir -File
+                foreach ($modFile in $modFiles) {
+                    $destPath = Join-Path $lodDir $modFile.Name
+                    Write-Host "Copying modded file to LOD: '$($modFile.Name)'"
+                    Copy-Item -Path $modFile.FullName -Destination $destPath -Force
+                    Write-VerboseLog -message "Copied to LOD: $($modFile.Name)" -logFile $logFile
                 }
             }
         }
-    }
-
-    # --- 7. NOW clean up modded extract dir if needed ---
-    if ($Execute -and (Test-Path $modExtractDir)) {
-        Write-Host "Deleting extracted modded BND dir: '$modExtractDir'"
+    }    # --- 6. Add _L suffix to LOD TPF files ---
+    if ((Test-Path $lodDir) -or (-not $Execute)) {
+        if (-not $Execute) {
+            Write-Host "[DRY-RUN] Would process LOD TPF files to add _L suffix"
+            if (Test-Path $lodDir) {
+                $lodTpfFiles = Get-ChildItem -Path $lodDir -Filter '*.tpf' -File | Where-Object { $_.Name -notmatch '_L\.tpf$' }
+                foreach ($lodTpf in $lodTpfFiles) {
+                    $newLodName = $lodTpf.Name -replace '\.tpf$', '_L.tpf'
+                    Write-Host "[DRY-RUN]   Would rename: '$($lodTpf.Name)' -> '$newLodName'"
+                    Write-Host "[DRY-RUN]   Would extract and add _L suffix to DDS files"
+                    Write-Host "[DRY-RUN]   Would update LOD XML references"
+                    Write-Host "[DRY-RUN]   Would repack LOD TPF"
+                }
+            }
+        } else {
+            $lodTpfFiles = Get-ChildItem -Path $lodDir -Filter '*.tpf' -File | Where-Object { $_.Name -notmatch '_L\.tpf$' }
+            foreach ($lodTpf in $lodTpfFiles) {
+                $newLodName = $lodTpf.Name -replace '\.tpf$', '_L.tpf'
+                Write-Host "Adding _L suffix to LOD TPF: '$($lodTpf.Name)' -> '$newLodName'"
+                
+                $newLodPath = Join-Path $lodDir $newLodName
+                if (Test-Path $newLodPath) { Remove-Item $newLodPath -Force }
+                Rename-Item -Path $lodTpf.FullName -NewName $newLodName -Force
+                Write-VerboseLog -message "Renamed LOD TPF: $($lodTpf.Name) -> $newLodName" -logFile $logFile
+                
+                # Extract the renamed LOD TPF to add _L suffix to DDS files
+                Push-Location $lodDir
+                & witchybnd -u $newLodName
+                $lodTpfExtractDir = Join-Path $lodDir ("$([IO.Path]::GetFileNameWithoutExtension($newLodName))-tpf")
+                
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $lodTpfExtractDir)) {
+                    # Check if TPF is intentionally empty
+                    if (Test-TpfEmpty -tpfExtractDir $lodTpfExtractDir -logFile $logFile) {
+                        Write-Host "LOD TPF is intentionally empty, skipping _L suffix processing: '$newLodName'"
+                        Write-VerboseLog -message "Skipped _L processing for empty LOD TPF: $newLodName" -logFile $logFile
+                    } else {
+                        # Add _L suffix to DDS files inside LOD TPF
+                        $lodDdsFiles = Get-ChildItem -Path $lodTpfExtractDir -Filter '*.dds' -File | Where-Object { $_.Name -notmatch '_L\.dds$' }
+                        foreach ($lodDds in $lodDdsFiles) {
+                            $newLodDdsName = $lodDds.Name -replace '\.dds$', '_L.dds'
+                            Write-Host "Adding _L suffix to LOD DDS: '$($lodDds.Name)' -> '$newLodDdsName'"
+                            Rename-Item -Path $lodDds.FullName -NewName $newLodDdsName -Force
+                        }
+                        
+                        # Update XML to reference _L.dds files
+                        $lodXmlFiles = Get-ChildItem -Path $lodTpfExtractDir -Filter '*-tpf.xml' -File
+                        if ($lodXmlFiles.Count -eq 0) {
+                            $lodXmlFiles = Get-ChildItem -Path $lodTpfExtractDir -Filter 'witchy-tpf.xml' -File
+                        }
+                        
+                        foreach ($lodXml in $lodXmlFiles) {
+                            $lodXmlContent = Get-Content $lodXml.FullName -Raw
+                            $newLodXml = $lodXmlContent -replace '<n>([^<>]+?)\.dds</n>', '<n>$1_L.dds</n>'
+                            
+                            if ($newLodXml -ne $lodXmlContent) {
+                                Write-Host "Updating LOD XML references to _L.dds: '$($lodXml.Name)'"
+                                $newLodXml | Set-Content -Path $lodXml.FullName -Encoding UTF8 -NoNewline
+                                Write-VerboseLog -message "Updated LOD XML: $($lodXml.Name)" -logFile $logFile
+                            }
+                        }
+                    }
+                    
+                    # Repack the LOD TPF
+                    & witchybnd -r $newLodName
+                    if ($LASTEXITCODE -eq 0 -and (Test-Path $lodTpfExtractDir)) {
+                        Remove-Item $lodTpfExtractDir -Recurse -Force
+                    }
+                }
+                Pop-Location
+            }
+        }
+    }    # Clean up extracted modded directory if not needed for repacking
+    if (!$renumbered -and $Execute -and (Test-Path $modExtractDir)) {
+        Write-Host "Cleaning up modded extract directory: '$modExtractDir'"
         Remove-Item $modExtractDir -Recurse -Force
+        Write-VerboseLog -message "Cleaned up extract dir: $modExtractDir" -logFile $logFile
+    } elseif (!$renumbered -and -not $Execute) {
+        Write-Host "[DRY-RUN] Would clean up modded extract directory if no renumbering occurred"
     }
 }
 
-# --- Summary ---
-if ($Execute) {
-    Write-Host "`nExecute complete."
-    $ts = Timestamp
-    "[$ts] Execute complete.`n" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+if (-not $Execute) {
+    Write-Host "`n[DRY-RUN] Processing complete! Re-run with -Execute to apply changes."
 } else {
-    Write-Host "`nDry-run complete."
-    $ts = Timestamp
-    "[$ts] Dry-run complete.`n" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    Write-Host "`nProcessing complete!"
 }
+Write-VerboseLog -message "EldenLOD-Extract.ps1 processing complete" -logFile $logFile

@@ -1,0 +1,189 @@
+name: EldenLOD Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-eldenlod:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup PowerShell
+      shell: pwsh
+      run: |
+        Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
+        Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+        
+    - name: Verify test data
+      shell: pwsh
+      run: |
+        Write-Host "Checking test data..."
+        $testZip = "tests/encumbered/TestCaseMaliketh.zip"
+        if (Test-Path $testZip) {
+          Write-Host "✓ Test case ZIP found: $testZip"
+          $zipInfo = Get-Item $testZip
+          Write-Host "  Size: $($zipInfo.Length) bytes"
+        } else {
+          Write-Warning "✗ Test case ZIP not found: $testZip"
+          Write-Host "Available files in tests/encumbered:"
+          Get-ChildItem -Path "tests/encumbered" -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+        }
+        
+    - name: Run minimal test
+      shell: pwsh
+      run: |
+        Write-Host "Running minimal EldenLOD test..."
+        try {
+          $result = & "tests/minimal-test.ps1" 2>&1
+          Write-Host $result
+          Write-Host "✓ Minimal test completed successfully"
+        } catch {
+          Write-Error "✗ Minimal test failed: $($_.Exception.Message)"
+          exit 1
+        }
+        
+    - name: Run comprehensive test (dry-run only)
+      shell: pwsh
+      run: |
+        Write-Host "Running comprehensive test in dry-run mode..."
+        try {
+          if (Test-Path "tests/Test-EldenLOD-Simple.ps1") {
+            $result = & "tests/Test-EldenLOD-Simple.ps1" -SkipExecution -Verbose 2>&1
+            Write-Host $result
+            Write-Host "✓ Comprehensive test completed successfully"
+          } else {
+            Write-Warning "Comprehensive test script not found, skipping"
+          }
+        } catch {
+          Write-Error "✗ Comprehensive test failed: $($_.Exception.Message)"
+          exit 1
+        }
+        
+    - name: Validate script syntax
+      shell: pwsh
+      run: |
+        Write-Host "Validating PowerShell script syntax..."
+        $scripts = @(
+          "EldenLOD-Extract.ps1",
+          "EldenLOD-Repack.ps1", 
+          "EldenLOD.psm1",
+          "Invoke-EldenLOD.ps1"
+        )
+        
+        foreach ($script in $scripts) {
+          if (Test-Path $script) {
+            try {
+              $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $script -Raw), [ref]$null)
+              Write-Host "✓ Syntax valid: $script"
+            } catch {
+              Write-Error "✗ Syntax error in $script: $($_.Exception.Message)"
+              exit 1
+            }
+          } else {
+            Write-Warning "Script not found: $script"
+          }
+        }
+        
+    - name: Check for function documentation
+      shell: pwsh
+      run: |
+        Write-Host "Checking for function documentation..."
+        if (Test-Path "FUNCTION_REFERENCE.md") {
+          Write-Host "✓ Function reference documentation found"
+        } else {
+          Write-Warning "Function reference documentation not found"
+        }
+        
+        if (Test-Path "PROJECT_OVERVIEW.md") {
+          Write-Host "✓ Project overview documentation found"  
+        } else {
+          Write-Warning "Project overview documentation not found"
+        }
+        
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: |
+          tests/**/*.log
+          tests/**/*results*
+        retention-days: 7
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PowerShell execution policy
+      run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+      shell: powershell
+      
+    - name: Verify test files exist
+      run: |
+        if (-not (Test-Path "tests/encumbered/TestCaseMaliketh.zip")) {
+          Write-Error "Clean test case not found: tests/encumbered/TestCaseMaliketh.zip"
+          exit 1
+        }
+        if (-not (Test-Path "tests/encumbered/TestCaseMaliketh-Fixed.zip")) {
+          Write-Error "Expected results not found: tests/encumbered/TestCaseMaliketh-Fixed.zip"
+          exit 1
+        }
+        Write-Host "Test files verified successfully"
+      shell: powershell
+      
+    - name: Create mock vanilla parts directory
+      run: |
+        # Create a mock vanilla parts directory structure for testing
+        $vanillaDir = "S:\ELDEN RING\Game\parts"
+        New-Item -ItemType Directory -Path $vanillaDir -Force
+        
+        # Create mock vanilla LOD files
+        $lodFiles = @(
+          "am_m_1620_L.partsbnd.dcx",
+          "bd_m_1620_L.partsbnd.dcx", 
+          "hd_m_1800_L.partsbnd.dcx",
+          "lg_m_1620_L.partsbnd.dcx"
+        )
+        
+        foreach ($file in $lodFiles) {
+          # Create small dummy files for testing
+          "Mock LOD file for testing" | Out-File -FilePath (Join-Path $vanillaDir $file) -Encoding ASCII
+        }
+        
+        Write-Host "Mock vanilla parts directory created at: $vanillaDir"
+        Get-ChildItem $vanillaDir | Format-Table Name, Length
+      shell: powershell
+      
+    - name: Run EldenLOD test suite
+      run: |
+        cd "scripts/EldenLOD"
+        .\tests\Test-EldenLOD.ps1 -Verbose
+      shell: powershell
+      
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: |
+          scripts/EldenLOD/tests/test-results.log
+          scripts/EldenLOD/tests/test-working/
+        retention-days: 7
+        
+    - name: Upload test logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: failure-logs
+        path: |
+          scripts/EldenLOD/_logs/
+          scripts/EldenLOD/tests/
+        retention-days: 14

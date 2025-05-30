@@ -290,6 +290,237 @@ function Remove-ExtractedDir {
     }
 }
 
+function Invoke-FileRenumbering {
+    param(
+        [string]$extractDir,
+        [string]$expectedNumber,
+        [string]$currentNumber,
+        [string]$logFile,
+        [switch]$Execute,
+        [switch]$DryRun
+    )
+    
+    Write-VerboseLog -message "Starting file renumbering: $extractDir ($currentNumber -> $expectedNumber)" -logFile $logFile
+    $renumbered = $false
+    $renamedFiles = @()
+    
+    # Define file patterns to renumber (excluding TPF files which should be handled separately)
+    $filePatterns = @('*.flver', '*.anibnd', '*.clm2', '*.hkx', '*.hks', '*.bnk', '*.flv')
+    
+    foreach ($pattern in $filePatterns) {
+        $files = Get-ChildItem -Path $extractDir -Filter $pattern -File
+        foreach ($file in $files) {
+            # Match pattern: PREFIX_CURRENTNUMBER[SUFFIX].EXTENSION
+            if ($file.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.*)\.([a-z0-9]+)$') {
+                $filePrefix = $matches[1]
+                $fileCurrentNumber = $matches[2]
+                $fileSuffix = $matches[3]
+                $fileExtension = $matches[4]
+                
+                # Only rename if there's a mismatch between container and file numbers
+                if ($fileCurrentNumber -ne $expectedNumber) {
+                    $newFileName = "${filePrefix}_${expectedNumber}${fileSuffix}.${fileExtension}"
+                    
+                    if ($DryRun) {
+                        Write-Host "Would renumber ${fileExtension.ToUpper()}: '$($file.Name)' -> '$newFileName'"
+                        Write-Host "  Container expects: $expectedNumber, file contains: $fileCurrentNumber"
+                    } else {
+                        Write-Host "Container/Content mismatch - Renumbering ${fileExtension.ToUpper()}: '$($file.Name)' -> '$newFileName'"
+                        Write-Host "  Container expects: $expectedNumber, file contains: $fileCurrentNumber"
+                    }
+                    
+                    if ($Execute) {
+                        $oldPath = $file.FullName
+                        $newPath = Join-Path $extractDir $newFileName
+                        if (Test-Path $newPath) { Remove-Item $newPath -Force }
+                        Rename-Item -Path $oldPath -NewName $newFileName -Force
+                        $renumbered = $true
+                        $renamedFiles += @{
+                            OldName = $file.Name
+                            NewName = $newFileName
+                        }
+                        Write-VerboseLog -message "Renamed file: $($file.Name) -> $newFileName" -logFile $logFile
+                    }
+                } else {
+                    if ($DryRun) {
+                        Write-Host "${fileExtension.ToUpper()} numbering matches container - no renaming needed: '$($file.Name)'"
+                    } else {
+                        Write-Host "${fileExtension.ToUpper()} numbering matches container - no renaming needed: '$($file.Name)'"
+                    }
+                }
+            }
+        }
+    }
+    
+    return @{
+        Renumbered = $renumbered
+        RenamedFiles = $renamedFiles
+    }
+}
+
+function Invoke-DdsRenumbering {
+    param(
+        [string]$tpfExtractDir,
+        [string]$expectedNumber,
+        [string]$logFile,
+        [switch]$Execute,
+        [switch]$DryRun
+    )
+    
+    Write-VerboseLog -message "Starting DDS renumbering: $tpfExtractDir (-> $expectedNumber)" -logFile $logFile
+    $ddsRenamed = $false
+    $renamedFiles = @()
+    
+    # Get DDS files in the extracted TPF directory
+    $ddsFiles = Get-ChildItem -Path $tpfExtractDir -Filter '*.dds' -File
+    
+    # Process DDS files inside TPF - only rename if numbers don't match container
+    foreach ($dds in $ddsFiles) {
+        if ($dds.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.+\.dds)$') {
+            $ddsPrefix = $matches[1]
+            $ddsCurrentNumber = $matches[2]
+            $ddsSuffix = $matches[3]
+            
+            # Only rename if there's a mismatch
+            if ($ddsCurrentNumber -ne $expectedNumber) {
+                $newDdsName = "${ddsPrefix}_${expectedNumber}${ddsSuffix}"
+                
+                if ($DryRun) {
+                    Write-Host "Would renumber DDS: '$($dds.Name)' -> '$newDdsName'"
+                    Write-Host "  Container expects: $expectedNumber, DDS contains: $ddsCurrentNumber"
+                } else {
+                    Write-Host "Container/Content mismatch - Renumbering DDS: '$($dds.Name)' -> '$newDdsName'"
+                    Write-Host "  Container expects: $expectedNumber, DDS contains: $ddsCurrentNumber"
+                }
+                
+                if ($Execute) {
+                    $oldPath = $dds.FullName
+                    $newPath = Join-Path $tpfExtractDir $newDdsName
+                    if (Test-Path $newPath) { Remove-Item $newPath -Force }
+                    Rename-Item -Path $oldPath -NewName $newDdsName -Force
+                    $ddsRenamed = $true
+                    $renamedFiles += @{
+                        OldName = $dds.Name
+                        NewName = $newDdsName
+                    }
+                    Write-VerboseLog -message "Renamed DDS: $($dds.Name) -> $newDdsName" -logFile $logFile
+                }
+            } else {
+                if ($DryRun) {
+                    Write-Host "DDS numbering matches container - no renaming needed: '$($dds.Name)'"
+                } else {
+                    Write-Host "DDS numbering matches container - no renaming needed: '$($dds.Name)'"
+                }
+            }
+        }
+    }
+    
+    return @{
+        Renumbered = $ddsRenamed
+        RenamedFiles = $renamedFiles
+    }
+}
+
+function Update-BndXmlReferences {
+    param(
+        [string]$bndXmlFile,
+        [array]$renamedFiles,
+        [string]$logFile,
+        [switch]$Execute,
+        [switch]$DryRun
+    )
+    
+    if (-not (Test-Path $bndXmlFile)) {
+        Write-VerboseLog -message "BND XML file not found: $bndXmlFile" -logFile $logFile
+        return $false
+    }
+    
+    if ($renamedFiles.Count -eq 0) {
+        Write-VerboseLog -message "No files were renamed, skipping BND XML update" -logFile $logFile
+        return $false
+    }
+    
+    $bndXmlContent = Get-Content $bndXmlFile -Raw
+    $newBndXml = $bndXmlContent
+    $hasChanges = $false
+    
+    foreach ($renamedFile in $renamedFiles) {
+        $oldName = $renamedFile.OldName
+        $newName = $renamedFile.NewName
+        
+        $updatedXml = $newBndXml -replace [regex]::Escape($oldName), $newName
+        if ($updatedXml -ne $newBndXml) {
+            $hasChanges = $true
+            $newBndXml = $updatedXml
+            
+            if ($DryRun) {
+                Write-Host "Would update BND4 XML reference: '$oldName' -> '$newName'"
+            } else {
+                Write-Host "Updating BND4 XML references: '$oldName' -> '$newName'"
+            }
+            Write-VerboseLog -message "Updated BND XML reference: $oldName -> $newName" -logFile $logFile
+        }
+    }
+    
+    if ($hasChanges -and $Execute) {
+        $newBndXml | Set-Content -Path $bndXmlFile -Encoding UTF8 -NoNewline
+        Write-VerboseLog -message "Updated BND XML file: $bndXmlFile" -logFile $logFile
+    }
+    
+    return $hasChanges
+}
+
+function Update-TpfXmlReferences {
+    param(
+        [string]$tpfExtractDir,
+        [array]$renamedFiles,
+        [string]$expectedNumber,
+        [string]$logFile,
+        [switch]$Execute,
+        [switch]$DryRun
+    )
+    
+    if ($renamedFiles.Count -eq 0) {
+        return $false
+    }
+    
+    # Find XML files in TPF directory
+    $xmlFiles = Get-ChildItem -Path $tpfExtractDir -Filter '*-tpf.xml' -File
+    if ($xmlFiles.Count -eq 0) {
+        $xmlFiles = Get-ChildItem -Path $tpfExtractDir -Filter 'witchy-tpf.xml' -File
+    }
+    if ($xmlFiles.Count -eq 0) {
+        $xmlFiles = Get-ChildItem -Path $tpfExtractDir -Filter '_witchy-tpf.xml' -File
+    }
+    
+    $hasChanges = $false
+    foreach ($xml in $xmlFiles) {
+        $xmlContent = Get-Content $xml.FullName -Raw
+        
+        # Update XML references to match the new DDS filenames
+        $newXml = $xmlContent -replace '<n>([A-Z]+_[A-Z]+)_[0-9]+([^<>]+\.dds)<\/n>', "<n>`$1_${expectedNumber}`$2</n>"
+        
+        if ($newXml -ne $xmlContent) {
+            $hasChanges = $true
+            if ($DryRun) {
+                Write-Host "Would update XML references: '$($xml.Name)' (updating DDS references to $expectedNumber)"
+            } else {
+                Write-Host "Updating XML references: '$($xml.Name)' (updating DDS references to $expectedNumber)"
+            }
+            Write-VerboseLog -message "TPF XML update: $($xml.Name) (Number: $expectedNumber)" -logFile $logFile
+            
+            if ($Execute) {
+                $newXml | Set-Content -Path $xml.FullName -Encoding UTF8 -NoNewline
+            }        } else {
+            if (-not $DryRun) {
+                Write-Host "XML file '$($xml.Name)' already has correct references"
+            }
+        }
+    }
+    
+    return $hasChanges
+}
+
 # Export functions that should be available to scripts
 Export-ModuleMember -Function @(
     'Timestamp',
@@ -298,5 +529,9 @@ Export-ModuleMember -Function @(
     'Test-TpfEmpty',
     'Test-TpfValid',
     'Invoke-TpfRepack',
-    'Remove-ExtractedDir'
+    'Remove-ExtractedDir',
+    'Invoke-FileRenumbering',
+    'Invoke-DdsRenumbering',
+    'Update-BndXmlReferences',
+    'Update-TpfXmlReferences'
 )

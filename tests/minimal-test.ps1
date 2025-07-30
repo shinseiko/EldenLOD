@@ -8,7 +8,7 @@ Write-Host "=== Minimal EldenLOD Test ===" -ForegroundColor Cyan
 # Set up paths correctly
 $testsDir = $PSScriptRoot  # This gives us the tests directory directly
 $mainDir = Split-Path -Parent $testsDir  # This gives us the main EldenLOD directory
-$mainScript = Join-Path $mainDir "EldenLOD-Extract.ps1"
+$mainScript = Join-Path $mainDir 'scripts/EldenLOD-Extract.ps1'
 $encumberedDir = Join-Path $testsDir "encumbered"
 $cleanDataDir = Join-Path $encumberedDir "TestCaseMaliketh-Clean\TestCaseMaliketh\parts"
 
@@ -35,9 +35,15 @@ try {
     if ($Execute) {
         Write-Host "Running EldenLOD script with -Execute..." -ForegroundColor Yellow
         & $mainScript -partsDir $cleanDataDir -Execute
+        if ($LASTEXITCODE -ne 0) {
+            throw "EldenLOD-Extract.ps1 exited with code $LASTEXITCODE"
+        }
     } else {
         Write-Host "Running EldenLOD script in dry-run mode..." -ForegroundColor Yellow
         & $mainScript -partsDir $cleanDataDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "EldenLOD-Extract.ps1 exited with code $LASTEXITCODE"
+        }
     }
     
     Write-Host "=== TEST COMPLETED SUCCESSFULLY ===" -ForegroundColor Green

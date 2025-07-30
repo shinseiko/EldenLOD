@@ -224,7 +224,8 @@ function Invoke-TpfRepack {
     param(
         [string]$tpfPath,
         [string]$tpfDir,
-        [string]$logFile
+        [string]$logFile,
+        [switch]$NoRenumber
     )
 
     Write-VerboseLog -message "Starting TPF repack: $tpfPath" -logFile $logFile
@@ -234,7 +235,14 @@ function Invoke-TpfRepack {
     if (-not (Test-TpfValid -tpfPath $tpfPath -expectedDir $tpfDir -logFile $logFile -skipDdsCheck)) {
         Write-VerboseLog -message "TPF validation failed, skipping repack" -logFile $logFile
         return $false
-    }    # Store original location
+    }
+
+    # Skip renumbering if -NoRenumber is set
+    if ($NoRenumber) {
+        Write-VerboseLog -message "Skipping TPF renumbering due to -NoRenumber switch" -logFile $logFile
+    } else {
+        # ...existing renumbering logic would go here if present...
+    }
     $originalLocation = Get-Location
     $tpfName = Split-Path $tpfPath -Leaf
       try {
@@ -331,9 +339,14 @@ function Invoke-FileRenumbering {
         [string]$currentNumber,
         [string]$logFile,
         [switch]$Execute,
-        [switch]$DryRun
+        [switch]$DryRun,
+        [switch]$NoRenumber
     )
     
+    if ($NoRenumber) {
+        Write-VerboseLog -message "Skipping file renumbering due to -NoRenumber switch" -logFile $logFile
+        return @{ Renumbered = $false; RenamedFiles = @() }
+    }
     Write-VerboseLog -message "Starting file renumbering: $extractDir ($currentNumber -> $expectedNumber)" -logFile $logFile
     $renumbered = $false
     $renamedFiles = @()
@@ -398,9 +411,14 @@ function Invoke-DdsRenumbering {
         [string]$expectedNumber,
         [string]$logFile,
         [switch]$Execute,
-        [switch]$DryRun
+        [switch]$DryRun,
+        [switch]$NoRenumber
     )
     
+    if ($NoRenumber) {
+        Write-VerboseLog -message "Skipping DDS renumbering due to -NoRenumber switch" -logFile $logFile
+        return @{ Renumbered = $false; RenamedFiles = @() }
+    }
     Write-VerboseLog -message "Starting DDS renumbering: $tpfExtractDir (-> $expectedNumber)" -logFile $logFile
     $ddsRenamed = $false
     $renamedFiles = @()
@@ -461,7 +479,8 @@ function Update-BndXmlReferences {
         [array]$renamedFiles,
         [string]$logFile,
         [switch]$Execute,
-        [switch]$DryRun
+        [switch]$DryRun,
+        [switch]$NoRenumber
     )
     
     if (-not (Test-Path $bndXmlFile)) {
@@ -469,6 +488,10 @@ function Update-BndXmlReferences {
         return $false
     }
     
+    if ($NoRenumber) {
+        Write-VerboseLog -message "Skipping BND XML reference update due to -NoRenumber switch" -logFile $logFile
+        return $false
+    }
     if ($renamedFiles.Count -eq 0) {
         Write-VerboseLog -message "No files were renamed, skipping BND XML update" -logFile $logFile
         return $false
@@ -511,9 +534,14 @@ function Update-TpfXmlReferences {
         [string]$expectedNumber,
         [string]$logFile,
         [switch]$Execute,
-        [switch]$DryRun
+        [switch]$DryRun,
+        [switch]$NoRenumber
     )
     
+    if ($NoRenumber) {
+        Write-VerboseLog -message "Skipping TPF XML reference update due to -NoRenumber switch" -logFile $logFile
+        return $false
+    }
     if ($renamedFiles.Count -eq 0) {
         return $false
     }

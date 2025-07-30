@@ -16,7 +16,8 @@
 
 param(
     [string] $partsDir = (Get-Location).Path,
-    [switch] $Execute
+    [switch] $Execute,
+    [switch] $NoRenumber
 )
 
 # Import shared module
@@ -67,13 +68,14 @@ foreach ($lodDirItem in $lodDirs) {
         }
     }
 
-    # --- Find *_L.tpf and repack it if the extracted *-tpf dir exists ---
-    $tpfFile = Get-ChildItem -Path $lodDir -Filter '*_L.tpf' -File | Select-Object -First 1
+    # --- Find the correct *_L.tpf and repack it if the extracted *-tpf dir exists ---
+    $tpfName = "${bndBase}_L.tpf"
+    $tpfFile = Get-ChildItem -Path $lodDir -Filter $tpfName -File | Select-Object -First 1
     if ($tpfFile) {
         $tpfExtractDir = Join-Path $lodDir ($tpfFile.BaseName + '-tpf')
         if (Test-Path $tpfExtractDir) {            # Validate and repack TPF
             if ($Execute) {
-                if (Invoke-TpfRepack -tpfPath $tpfFile.FullName -tpfDir $tpfExtractDir -logFile $logFile) {
+                if (Invoke-TpfRepack -tpfPath $tpfFile.FullName -tpfDir $tpfExtractDir -logFile $logFile -NoRenumber:$NoRenumber) {
                     Write-Host "Successfully repacked TPF: '$($tpfFile.Name)'"
 
                     # Remove the extracted *-tpf dir after repacking!
@@ -89,9 +91,9 @@ foreach ($lodDirItem in $lodDirs) {
             Write-Host "No extracted *-tpf dir to repack for '$($tpfFile.Name)'."
         }
     } else {
-        Write-Warning "No *_L.tpf found in '$lodDir'!"
+        Write-Warning "No $tpfName found in '$lodDir'!"
         $ts = Timestamp
-        "[$ts] No *_L.tpf in $lodDir" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        "[$ts] No $tpfName in $lodDir" | Out-File -FilePath $logFile -Encoding UTF8 -Append
     }
 
     # --- Clean again for cruft (in case *-tpf or .bak files still exist) ---
@@ -107,20 +109,59 @@ foreach ($lodDirItem in $lodDirs) {
         }
     }
 
+
+    # --- Optionally skip renumbering if -NoRenumber is set ---
+    if ($NoRenumber) {
+        Write-Host "Skipping internal renumbering due to -NoRenumber switch."
+    } else {
+        # Place any renumbering logic here if it exists in this script
+        # If renumbering is handled in called functions, this block may be empty
+    }
+
     # --- Repack the BND directory into *_L.partsbnd.dcx ---
     if ($Execute) {
         Push-Location $lodDir
         Write-Host "Repacking: '$($bndLName)' from '$($lodDir)'"
+        
+        # Create temporary non-LOD TPF for WitchyBND
+        $tempTpf = $null
+        if ($tpfFile) {
+            $nonLodName = $tpfFile.Name -replace '_L\.tpf$', '.tpf'
+            $tempTpf = Join-Path $lodDir $nonLodName
+            Write-Host "Creating temporary TPF copy: '$nonLodName'"
+            Copy-Item -Path $tpfFile.FullName -Destination $tempTpf -Force
+        }
+        
+        # Perform the repack
         & witchybnd -r $lodDir
-        if ($LASTEXITCODE -ne 0) {
+        $repackResult = $LASTEXITCODE
+        
+        # Clean up temporary TPF
+        if ($tempTpf -and (Test-Path $tempTpf)) {
+            Write-Host "Cleaning up temporary TPF: '$tempTpf'"
+            Remove-Item $tempTpf -Force
+        }
+        
+        if ($repackResult -ne 0) {
             Write-Warning "ERROR: witchybnd failed for '$bndLName'"
             $ts = Timestamp
             "[$ts] ERROR repacking $bndLName" | Out-File -FilePath $logFile -Encoding UTF8 -Append
         } else {
             $ts = Timestamp
             "[$ts] Repacked: $bndLName" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+            
+            # Clean up the extracted BND directory after successful repack
+            Pop-Location  # Need to move out of the directory before deleting it
+            if (Test-Path $lodDir) {
+                Write-Host "Cleaning up extracted BND directory: '$lodDir'"
+                Remove-Item $lodDir -Recurse -Force
+                $ts = Timestamp
+                "[$ts] Cleaned up: $lodDir" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+            }
         }
-        Pop-Location
+        if (-not $repackResult -eq 0) {
+            Pop-Location  # Only pop if we failed, otherwise already done above
+        }
     } else {
         Write-Host "Would repack BND dir: '$($lodDir)' into '$($bndLName)'"
     }

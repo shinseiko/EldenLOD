@@ -1,3 +1,4 @@
+
 <#
 .SYNOPSIS
 EldenLOD - Elden Ring Level of Detail (LOD) Asset Processing Toolkit
@@ -8,7 +9,7 @@ Automates the complete workflow for processing Elden Ring LOD assets:
 - Patches LOD files with modded content  
 - Repacks everything for seamless co-op compatibility
 
-.PARAMETER PartsDir
+.PARAMETER partsDir
 Directory containing your mod's .partsbnd.dcx files
 
 .PARAMETER WorkflowType
@@ -18,10 +19,10 @@ Specify processing type: 'Full', 'ExtractOnly', 'RepackOnly'
 Actually perform operations (default is dry-run)
 
 .EXAMPLE
-Invoke-EldenLOD -PartsDir "C:\Mods\MyMod\parts" -Execute
+Invoke-EldenLOD -partsDir "C:\Mods\MyMod\parts" -Execute
 
 .EXAMPLE
-Invoke-EldenLOD -PartsDir "C:\Mods\MyMod\parts" -WorkflowType ExtractOnly -Execute
+Invoke-EldenLOD -partsDir "C:\Mods\MyMod\parts" -WorkflowType ExtractOnly -Execute
 
 .NOTES
 Enhanced version combining the best features from multiple script approaches.
@@ -29,10 +30,11 @@ Handles empty TPF files, proper file renumbering, and comprehensive error handli
 #>
 [CmdletBinding()]
 param(
-    [string]$PartsDir = (Get-Location).Path,
+    [string]$partsDir = (Get-Location).Path,
     [ValidateSet('Full', 'ExtractOnly', 'RepackOnly')]
     [string]$WorkflowType = 'Full',
-    [switch]$Execute
+    [switch]$Execute,
+    [switch]$NoRenumber
 )
 
 # Import shared module
@@ -41,14 +43,14 @@ Import-Module $modulePath -Force -ErrorAction Stop
 
 # Validate paths and setup
 try {
-    $PartsDir = Convert-Path -Path $PartsDir -ErrorAction Stop
+    $partsDir = Convert-Path -Path $partsDir -ErrorAction Stop
 } catch {
-    Write-Error "Invalid PartsDir: '$PartsDir'. Please specify an existing folder."
+    Write-Error "Invalid partsDir: '$partsDir'. Please specify an existing folder."
     exit 1
 }
 
 Write-Host "EldenLOD v2.0 - Elden Ring LOD Asset Processing Toolkit"
-Write-Host "Working directory: $PartsDir"
+Write-Host "Working directory: $partsDir"
 Write-Host "Workflow type: $WorkflowType"
 if (-not $Execute) {
     Write-Warning "DRY-RUN MODE: Add -Execute to perform actual operations"
@@ -56,10 +58,13 @@ if (-not $Execute) {
 
 # Compose argument hashtables for downstream scripts
 $commonArgs = @{
-    partsDir = $PartsDir
+    partsDir = $partsDir
 }
 if ($Execute) { 
     $commonArgs.Execute = $true 
+}
+if ($NoRenumber) {
+    $commonArgs.NoRenumber = $true
 }
 
 # Define script paths using the restructured approach

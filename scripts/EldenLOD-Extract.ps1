@@ -16,6 +16,7 @@
 param(
     [string] $partsDir = (Get-Location).Path,
     [switch] $Execute,
+    [switch] $NoRenumber,
     [string] $UnpackedGameDir = ""
 )
 
@@ -77,6 +78,10 @@ foreach ($bndFile in $modPrimaryBnds) {
     $renumbered = $false
     $tpfExtractDirs = @()
 
+    if ($NoRenumber) {
+        Write-Host "Skipping all renumbering due to -NoRenumber switch."
+    }
+
     # --- 1. Ensure LOD BND exists (copy vanilla if missing) ---
     if (!(Test-Path $modLodPath)) {
         $vanillaLodPath = Join-Path $vanillaPartsDir $lodFile
@@ -120,48 +125,47 @@ foreach ($bndFile in $modPrimaryBnds) {
             Push-Location $modExtractDir
             
             # Check if TPF needs renumbering based on BND container vs TPF contents
-            if ($tpf.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.*)\.tpf$') {
-                $tpfPrefix = $matches[1]
-                $tpfCurrentNumber = $matches[2]
-                $tpfSuffix = $matches[3]
-                
-                # Get expected number from the BND container name (e.g., "1800" from "HD_M_1800")
-                $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
-                  # Only rename if there's a mismatch between container and contents
-                if ($tpfCurrentNumber -ne $expectedNumber) {
-                    $newTpfName = "${tpfPrefix}_${expectedNumber}${tpfSuffix}.tpf"
-                    if (-not $Execute) {
-                        Write-Host "[DRY-RUN] Would rename TPF: '$($tpf.Name)' -> '$newTpfName'"
-                        Write-Host "[DRY-RUN]   Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
-                        Write-Host "[DRY-RUN]   Would update BND4 XML references"
-                    } else {
-                        Write-Host "Container/Content mismatch - Renumbering TPF: '$($tpf.Name)' -> '$newTpfName'"
-                        Write-Host "  Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
-                        
-                        $oldPath = $tpf.FullName
-                        $newPath = Join-Path $modExtractDir $newTpfName
-                        if (Test-Path $newPath) { Remove-Item $newPath -Force }
-                        Rename-Item -Path $oldPath -NewName $newTpfName -Force
-                        $tpf = Get-Item $newPath # Update TPF reference to renamed file
-                        $renumbered = $true
-                        
-                        # Update BND4 XML to reference the new TPF filename
-                        $bndXmlFile = Join-Path $modExtractDir "_witchy-bnd4.xml"
-                        if (Test-Path $bndXmlFile) {
-                            $bndXmlContent = Get-Content $bndXmlFile -Raw
-                            $oldTpfName = "${tpfPrefix}_${tpfCurrentNumber}${tpfSuffix}.tpf"
-                            $newBndXml = $bndXmlContent -replace [regex]::Escape($oldTpfName), $newTpfName
-                            if ($newBndXml -ne $bndXmlContent) {
-                                Write-Host "Updating BND4 XML references: '$oldTpfName' -> '$newTpfName'"
-                                $newBndXml | Set-Content -Path $bndXmlFile -Encoding UTF8 -NoNewline
+            if (-not $NoRenumber) {
+                if ($tpf.Name -match '^([A-Z]+_[A-Z]+)_([0-9]+)(.*)\.tpf$') {
+                    $tpfPrefix = $matches[1]
+                    $tpfCurrentNumber = $matches[2]
+                    $tpfSuffix = $matches[3]
+                    # Get expected number from the BND container name (e.g., "1800" from "HD_M_1800")
+                    $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
+                    # Only rename if there's a mismatch between container and contents
+                    if ($tpfCurrentNumber -ne $expectedNumber) {
+                        $newTpfName = "${tpfPrefix}_${expectedNumber}${tpfSuffix}.tpf"
+                        if (-not $Execute) {
+                            Write-Host "[DRY-RUN] Would rename TPF: '$($tpf.Name)' -> '$newTpfName'"
+                            Write-Host "[DRY-RUN]   Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
+                            Write-Host "[DRY-RUN]   Would update BND4 XML references"
+                        } else {
+                            Write-Host "Container/Content mismatch - Renumbering TPF: '$($tpf.Name)' -> '$newTpfName'"
+                            Write-Host "  Container expects: $expectedNumber, TPF contains: $tpfCurrentNumber"
+                            $oldPath = $tpf.FullName
+                            $newPath = Join-Path $modExtractDir $newTpfName
+                            if (Test-Path $newPath) { Remove-Item $newPath -Force }
+                            Rename-Item -Path $oldPath -NewName $newTpfName -Force
+                            $tpf = Get-Item $newPath # Update TPF reference to renamed file
+                            $renumbered = $true
+                            # Update BND4 XML to reference the new TPF filename
+                            $bndXmlFile = Join-Path $modExtractDir "_witchy-bnd4.xml"
+                            if (Test-Path $bndXmlFile) {
+                                $bndXmlContent = Get-Content $bndXmlFile -Raw
+                                $oldTpfName = "${tpfPrefix}_${tpfCurrentNumber}${tpfSuffix}.tpf"
+                                $newBndXml = $bndXmlContent -replace [regex]::Escape($oldTpfName), $newTpfName
+                                if ($newBndXml -ne $bndXmlContent) {
+                                    Write-Host "Updating BND4 XML references: '$oldTpfName' -> '$newTpfName'"
+                                    $newBndXml | Set-Content -Path $bndXmlFile -Encoding UTF8 -NoNewline
+                                }
                             }
                         }
-                    }
-                } else {
-                    if (-not $Execute) {
-                        Write-Host "[DRY-RUN] TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
                     } else {
-                        Write-Host "TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
+                        if (-not $Execute) {
+                            Write-Host "[DRY-RUN] TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
+                        } else {
+                            Write-Host "TPF numbering matches container - no renaming needed: '$($tpf.Name)'"
+                        }
                     }
                 }
             }
@@ -196,13 +200,13 @@ foreach ($bndFile in $modPrimaryBnds) {
                 
                 # Process DDS files using shared module function
                 $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
-                $ddsResult = Invoke-DdsRenumbering -tpfExtractDir $tpfExtractDir -expectedNumber $expectedNumber -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)
+                $ddsResult = Invoke-DdsRenumbering -tpfExtractDir $tpfExtractDir -expectedNumber $expectedNumber -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute) -NoRenumber:$NoRenumber
                 
                 if ($ddsResult.Renumbered) {
                     $renumbered = $true
                     
                     # Update TPF XML references using shared module function
-                    if (Update-TpfXmlReferences -tpfExtractDir $tpfExtractDir -renamedFiles $ddsResult.RenamedFiles -expectedNumber $expectedNumber -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)) {
+                    if (Update-TpfXmlReferences -tpfExtractDir $tpfExtractDir -renamedFiles $ddsResult.RenamedFiles -expectedNumber $expectedNumber -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute) -NoRenumber:$NoRenumber) {
                         if (-not $Execute) {
                             Write-Host "[DRY-RUN] Would update TPF XML references"
                         }
@@ -219,14 +223,14 @@ foreach ($bndFile in $modPrimaryBnds) {
             $expectedNumber = $baseUpper -replace '^[A-Z]+_[A-Z]+_', ''
             
             # Use shared module function for file renumbering (currentNumber will be auto-detected from files)
-            $fileResult = Invoke-FileRenumbering -extractDir $modExtractDir -expectedNumber $expectedNumber -currentNumber "auto" -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)
+            $fileResult = Invoke-FileRenumbering -extractDir $modExtractDir -expectedNumber $expectedNumber -currentNumber "auto" -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute) -NoRenumber:$NoRenumber
             
             if ($fileResult.Renumbered) {
                 $renumbered = $true
                 
                 # Update BND4 XML references using shared module function
                 $bndXmlFile = Join-Path $modExtractDir "_witchy-bnd4.xml"
-                if (Update-BndXmlReferences -bndXmlFile $bndXmlFile -renamedFiles $fileResult.RenamedFiles -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute)) {
+                if (Update-BndXmlReferences -bndXmlFile $bndXmlFile -renamedFiles $fileResult.RenamedFiles -logFile $logFile -Execute:$Execute -DryRun:(-not $Execute) -NoRenumber:$NoRenumber) {
                     if (-not $Execute) {
                         Write-Host "[DRY-RUN] Would update BND4 XML references"
                     }

@@ -68,14 +68,71 @@ foreach ($lodDirItem in $lodDirs) {
         }
     }
 
-    # --- Find the correct *_L.tpf and repack it if the extracted *-tpf dir exists ---
+    # --- Find and process TPF files, ensuring ALL content is preserved with proper LOD naming ---
     $tpfName = "${bndBase}_L.tpf"
     $tpfFile = Get-ChildItem -Path $lodDir -Filter $tpfName -File | Select-Object -First 1
+    
+    # Find original TPF for content preservation - handle case-insensitively
+    $originalTpfName = $bndBase -replace '_L$', '' -replace '_l$', ''
+    
+    # Look for the original TPF directory with proper casing
+    $originalTpfDir = Get-ChildItem -Path $partsDir -Directory | 
+        Where-Object { $_.Name -like "$($originalTpfName)-partsbnd-dcx" } |
+        Select-Object -First 1 |
+        ForEach-Object { $_.FullName }
+        
+    if (-not $originalTpfDir) {
+        Write-Warning "Could not find original TPF directory for content preservation"
+        return
+    }
+    
+    $originalTpfName = (Split-Path $originalTpfDir -Leaf) -replace '-partsbnd-dcx$', ''
+    $originalTpfPath = Join-Path $originalTpfDir "${originalTpfName}.tpf"
+    
     if ($tpfFile) {
         $tpfExtractDir = Join-Path $lodDir ($tpfFile.BaseName + '-tpf')
+        
+        # If we have the original TPF extracted, copy its contents first
+        $originalTpfExtractDir = Get-ChildItem -Path $originalTpfDir -Directory | 
+            Where-Object { $_.Name -like "*-tpf" } |
+            Select-Object -First 1 |
+            ForEach-Object { $_.FullName }
+            
+        if ($originalTpfExtractDir) {
+            Write-Host "Found original TPF extracted at: $originalTpfExtractDir"
+            
+            if (-not (Test-Path $tpfExtractDir)) {
+                New-Item -Path $tpfExtractDir -ItemType Directory -Force | Out-Null
+            }
+            
+            # First, copy the XML metadata
+            $xmlFiles = Get-ChildItem -Path $originalTpfExtractDir -Filter "*witchy-tpf.xml"
+            foreach ($xml in $xmlFiles) {
+                Copy-Item -Path $xml.FullName -Destination (Join-Path $tpfExtractDir "_witchy-tpf.xml") -Force
+            }
+            
+            # Now copy and rename DDS files based on NoRenumber setting
+            Get-ChildItem -Path $originalTpfExtractDir -Filter "*.dds" | ForEach-Object {
+                $targetName = if ($NoRenumber) {
+                    # Keep original name for non-renumbering
+                    $_.Name
+                } else {
+                    # Add _L suffix before .dds
+                    $_.Name -replace '\.dds$', '_L.dds'
+                }
+                
+                Write-Host "Copying $($_.Name) -> $targetName"
+                Copy-Item -Path $_.FullName -Destination (Join-Path $tpfExtractDir $targetName) -Force
+            }
+        } else {
+            Write-Warning "Could not find original TPF extracted directory in: $originalTpfDir"
+        }
+        }
+        
         if (Test-Path $tpfExtractDir) {            # Validate and repack TPF
             if ($Execute) {
-                if (Invoke-TpfRepack -tpfPath $tpfFile.FullName -tpfDir $tpfExtractDir -logFile $logFile -NoRenumber:$NoRenumber) {
+                # Always use NoRenumber for TPF repacking to preserve content
+                if (Invoke-TpfRepack -tpfPath $tpfFile.FullName -tpfDir $tpfExtractDir -logFile $logFile -NoRenumber:$true) {
                     Write-Host "Successfully repacked TPF: '$($tpfFile.Name)'"
 
                     # Remove the extracted *-tpf dir after repacking!
@@ -118,21 +175,24 @@ foreach ($lodDirItem in $lodDirs) {
         # If renumbering is handled in called functions, this block may be empty
     }
 
-    # --- Repack the BND directory into *_L.partsbnd.dcx ---
+    # --- Repack the BND directory into *_L.partsbnd.dcx, preserving all content ---
     if ($Execute) {
         Push-Location $lodDir
         Write-Host "Repacking: '$($bndLName)' from '$($lodDir)'"
         
-        # Create temporary non-LOD TPF for WitchyBND
-        $tempTpf = $null
+        # Create links/copies for WitchyBND to handle both LOD and non-LOD naming
+        $tempFiles = @()
         if ($tpfFile) {
+            # Create non-LOD version for compatibility
             $nonLodName = $tpfFile.Name -replace '_L\.tpf$', '.tpf'
             $tempTpf = Join-Path $lodDir $nonLodName
             Write-Host "Creating temporary TPF copy: '$nonLodName'"
             Copy-Item -Path $tpfFile.FullName -Destination $tempTpf -Force
+            $tempFiles += $tempTpf
         }
         
         # Perform the repack
+        Write-Host "Repacking BND..."
         & witchybnd -r $lodDir
         $repackResult = $LASTEXITCODE
         

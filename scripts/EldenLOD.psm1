@@ -246,11 +246,18 @@ function Invoke-TpfRepack {
     $originalLocation = Get-Location
     $tpfName = Split-Path $tpfPath -Leaf
       try {
-        # The TPF directory should already contain the XML from extraction
+        # Check for XML files in both formats
         $xmlPath = Join-Path $tpfDir '_witchy-tpf.xml'
-        if (-not (Test-Path $xmlPath)) {
-            Write-LogMessage -message "Missing expected XML from TPF extraction: $xmlPath" -logFile $logFile -isError
+        $altXmlPath = Join-Path $tpfDir 'witchy-tpf.xml'
+        
+        if (-not (Test-Path $xmlPath) -and -not (Test-Path $altXmlPath)) {
+            Write-LogMessage -message "Missing expected XML from TPF extraction: Neither $xmlPath nor $altXmlPath found" -logFile $logFile -isError
             return $false
+        }
+        
+        # If we have the alternate XML name, standardize to _witchy-tpf.xml
+        if (Test-Path $altXmlPath) {
+            Move-Item -Path $altXmlPath -Destination $xmlPath -Force
         }
         
         # Remove any existing backup files

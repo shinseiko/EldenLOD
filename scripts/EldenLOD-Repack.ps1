@@ -127,7 +127,6 @@ foreach ($lodDirItem in $lodDirs) {
         } else {
             Write-Warning "Could not find original TPF extracted directory in: $originalTpfDir"
         }
-        }
         
         if (Test-Path $tpfExtractDir) {            # Validate and repack TPF
             if ($Execute) {

@@ -55,6 +55,53 @@ foreach ($lodDirItem in $lodDirs) {
 
     Write-Host "`n===== Processing $($lodDirItem.Name) ====="
 
+    # Enhanced logging for better traceability
+    Write-Verbose "Processing LOD directory: $lodDir" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+
+    # --- Remove vanilla FLVER and TPF files if they exist ---
+    if ($Execute -and (Test-Path $lodDir)) {
+        $vanillaFlver = Get-ChildItem -Path $lodDir -Filter "*.flver" | Where-Object { $_.Name -like "*_L.flver" } | Select-Object -First 1
+        if ($vanillaFlver) {
+            Write-Host "Removing vanilla mesh: '$($vanillaFlver.Name)'"
+            Remove-Item $vanillaFlver.FullName -Force
+        }
+        
+        $vanillaTpf = Get-ChildItem -Path $lodDir -Filter "*.tpf" | Where-Object { $_.Name -like "*_L.tpf" } | Select-Object -First 1
+        if ($vanillaTpf) {
+            Write-Host "Removing vanilla TPF: '$($vanillaTpf.Name)'"
+            Remove-Item $vanillaTpf.FullName -Force
+        }
+    }
+
+    # Log vanilla file removal
+    if ($vanillaFlver) {
+        Write-Host "[LOG] Removed vanilla FLVER: $($vanillaFlver.Name)" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    }
+    if ($vanillaTpf) {
+        Write-Host "[LOG] Removed vanilla TPF: $($vanillaTpf.Name)" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    }
+
+    # --- Copy modded mesh from regular modded extract dir into LOD dir, renaming to *_L.flver ---
+    $modExtractDir = Join-Path $partsDir ("${bndBase}-partsbnd-dcx")
+    $modFlver = Get-ChildItem -Path $modExtractDir -Filter "${bndBase}.flver" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($modFlver) {
+        $lodFlverName = "${bndBase}_L.flver"
+        $lodFlverPath = Join-Path $lodDir $lodFlverName
+        Write-Host "Copying modded mesh to LOD: '$($modFlver.Name)' -> '$lodFlverName'"
+        Copy-Item -Path $modFlver.FullName -Destination $lodFlverPath -Force
+    } else {
+        Write-Host "No modded mesh found to port to LOD for $bndBase."
+    }
+
+    # Log modded file copying
+    if ($modFlver) {
+        Write-Host "[LOG] Copied modded FLVER to LOD: $($modFlver.Name) -> $lodFlverName" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    } else {
+        Write-Host "[LOG] No modded FLVER found for $bndBase" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    }
+
+    Write-Host "`n===== Processing $($lodDirItem.Name) ====="
+
     # --- Clean .bak and junk files in LOD dir before packing ---
     $cruft = Get-ChildItem -Path $lodDir -Recurse -Include '*.bak', '*.tmp', '*~', '*.old'
     foreach ($file in $cruft) {
@@ -86,18 +133,15 @@ foreach ($lodDirItem in $lodDirs) {
         return
     }
     
-    $originalTpfName = (Split-Path $originalTpfDir -Leaf) -replace '-partsbnd-dcx$', ''
-    $originalTpfPath = Join-Path $originalTpfDir "${originalTpfName}.tpf"
-    
+    $originalTpfExtractDir = Get-ChildItem -Path $originalTpfDir -Directory | 
+        Where-Object { $_.Name -like "*-tpf" } |
+        Select-Object -First 1 |
+        ForEach-Object { $_.FullName }
+        
     if ($tpfFile) {
         $tpfExtractDir = Join-Path $lodDir ($tpfFile.BaseName + '-tpf')
         
         # If we have the original TPF extracted, copy its contents first
-        $originalTpfExtractDir = Get-ChildItem -Path $originalTpfDir -Directory | 
-            Where-Object { $_.Name -like "*-tpf" } |
-            Select-Object -First 1 |
-            ForEach-Object { $_.FullName }
-            
         if ($originalTpfExtractDir) {
             Write-Host "Found original TPF extracted at: $originalTpfExtractDir"
             
@@ -226,8 +270,42 @@ foreach ($lodDirItem in $lodDirs) {
     }
 }
 
-# Summary
+# --- Update extracted TPF files and XML metadata for LOD naming ---
+if ($tpfFile) {
+    $tpfExtractDir = Join-Path $lodDir ($tpfFile.BaseName + '-tpf')
+
+    if (Test-Path $tpfExtractDir) {
+        # Rename DDS files with _L suffix
+        Get-ChildItem -Path $tpfExtractDir -Filter "*.dds" | ForEach-Object {
+            $newName = $_.Name -replace '\.dds$', '_L.dds'
+            $newPath = Join-Path $tpfExtractDir $newName
+            Rename-Item -Path $_.FullName -NewName $newPath -Force
+            Write-Host "Renamed: $($_.Name) -> $newName"
+        }
+
+        # Update XML metadata to reflect _L naming
+        $xmlFiles = Get-ChildItem -Path $tpfExtractDir -Filter "*_witchy-tpf.xml"
+        foreach ($xml in $xmlFiles) {
+            (Get-Content -Path $xml.FullName) -replace '(?<=<File>)(.*?)(?=\.dds<\/File>)', { $_ + '_L' } |
+                Set-Content -Path $xml.FullName -Force
+            Write-Host "Updated XML metadata: $($xml.Name)"
+        }
+    } else {
+        Write-Warning "No extracted TPF directory found for: $($tpfFile.Name)"
+    }
+}
+
+# After all LOD repacks, clean up modded extract directories
 if ($Execute) {
+    $modExtractDirs = Get-ChildItem -Path $partsDir -Directory | Where-Object { $_.Name -like '*-partsbnd-dcx' -and $_.Name -notlike '*_L-partsbnd-dcx' }
+    foreach ($dir in $modExtractDirs) {
+        if (Test-Path $dir.FullName) {
+            Write-Host "Cleaning up modded extract directory: '$($dir.FullName)'"
+            Remove-Item $dir.FullName -Recurse -Force
+            $ts = Timestamp
+            "[$ts] Cleaned up modded extract directory: $($dir.FullName)" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        }
+    }
     Write-Host "`nExecute complete."
     $ts = Timestamp
     "[$ts] Execute complete.`n" | Out-File -FilePath $logFile -Encoding UTF8 -Append
